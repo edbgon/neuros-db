@@ -1,0 +1,7 @@
+/target/
+*.img
+*.tar.gz
+*.zip
+*.bak
+.idea/
+.vscode/

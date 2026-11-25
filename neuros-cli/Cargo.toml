@@ -1,0 +1,19 @@
+[package]
+name = "neuros-cli"
+description = "Command-line Neuros database builder"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+keywords.workspace = true
+
+[dependencies]
+anyhow = "1.0.104"
+clap = { version = "4.6.8", features = ["derive"] }
+neuros-core = { version = "0.1.0-beta.1", path = "../neuros-core" }
+
+[[bin]]
+name = "neuros-db"
+path = "src/main.rs"
