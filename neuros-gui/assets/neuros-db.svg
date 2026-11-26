@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2b5f8f"/>
+      <stop offset="1" stop-color="#173a5c"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="44" fill="url(#bg)"/>
+  <rect x="8" y="8" width="240" height="240" rx="44" fill="none" stroke="#0e2740" stroke-width="4"/>
+  <g font-family="Noto Sans" font-weight="900" text-anchor="middle">
+    <text x="128" y="117" font-size="100" fill="#ffffff" letter-spacing="-4">ND</text>
+    <text x="128" y="214" font-size="100" letter-spacing="-4"><tspan fill="#f5b041">b</tspan><tspan fill="#ffffff">B</tspan></text>
+  </g>
+</svg>

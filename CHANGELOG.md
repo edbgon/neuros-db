@@ -1,42 +1,26 @@
 # Changelog
 
+## [Unreleased]
+
+- The window opens right away; the device and its database are read in the
+  background with a progress indicator (slow over the Neuros's USB 1.1).
+- Tidier main window: fixed toolbar, settings moved to an Options window,
+  status bar.
+- App icon. On Linux, *Options → Add to the application menu* installs a menu
+  entry, which also shows the icon on Wayland.
+
 ## [0.1.0-beta.1] - 2026-11-25
 
-First public beta. Tested on Linux with a Neuros (firmware 2.28) on its own
-USB and with its hard disk on a USB-IDE adapter. Windows and macOS builds are
-provided but untested on hardware.
+First public beta. Tested on Linux with firmware 2.28, over the Neuros's own
+USB and with the hard disk on a USB-IDE adapter. Windows and macOS builds are
+untested on hardware. Back up `WOID_DB` before first use.
 
-**Back up your `WOID_DB` folder before first use.** The tool also backs up the
-database before every write, but deleted or overwritten music files can't be
-restored.
+- Build the database from the MP3 and Ogg files on the Neuros.
+- Add files or folders; sync a music folder from the computer.
+- Edit title, artist, album and genre.
+- Find and remove duplicate songs.
+- Repair `?` left by old taggers.
+- Albums → Artists menu (firmware 2.14+).
+- Hard disk on a USB-IDE adapter (byte-swapped) supported.
 
-### Features
-
-- Build the Neuros music database (`WOID_DB`) from the MP3 and Ogg Vorbis files
-  on the device: Songs, Artists, Albums, Genres, Recordings, and the
-  Albums → Artists menu of firmware 2.14+.
-- Works on a mounted Neuros (hard disk or flash) and directly on the Neuros
-  hard disk connected through a USB-IDE adapter, whose contents are
-  byte-swapped (detected automatically).
-- **Add music**: copy files or whole folders (with subfolders), sorted into
-  Artist/Album folders, keeping their folder structure, or into one folder.
-  The database is updated without a full rescan.
-- **Sync from PC**: make a folder on the Neuros match a music folder on the
-  computer. Recognises files already on the Neuros under other names (by
-  content) and re-tagged files (by artist/album/title), skips duplicate copies
-  on the PC, and can remove files that are no longer on the PC.
-- **Edit** title, artist, album and genre, for one track or many at once.
-  Edits are kept in `WOID_DB` and survive rescans and syncs.
-- **Find duplicates**: identical files, two rips of one album, tagged and
-  untagged copies; optionally the same song on other albums. Suggests which
-  copy to keep.
-- **Fix "?" in text**: repairs apostrophes and dashes that old taggers saved
-  as "?" (`Don?t` → `Don't`, `80?85` → `80-85`), with a preview.
-- Text and file names are made ASCII-safe (non-ASCII file names lock up the
-  Neuros).
-- Sortable track lists, filter, dry runs and a `verify` command.
-- GUI (`neuros-gui`) and command line (`neuros-db`).
-
-### Not yet
-
-- Playlists.
+Not yet: playlists.

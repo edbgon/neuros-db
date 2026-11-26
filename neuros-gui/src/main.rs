@@ -23,19 +23,29 @@ use neuros_core::{
     WriteReport,
 };
 
+/// The app icon ("NDbB"), from assets/neuros-db.svg.
+const ICON_PNG: &[u8] = include_bytes!("../assets/neuros-db.png");
+/// Window app ID. On Wayland the desktop shows the icon of the `.desktop`
+/// file with this name (see `install_desktop_entry`).
+const APP_ID: &str = "neuros-db";
+
 fn main() -> eframe::Result {
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title(concat!("Neuros Database Builder ", env!("CARGO_PKG_VERSION")))
-            .with_inner_size([1100.0, 740.0])
-            .with_min_inner_size([700.0, 450.0]),
-        ..Default::default()
-    };
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_app_id(APP_ID)
+        .with_title(concat!("Neuros Database Builder ", env!("CARGO_PKG_VERSION")))
+        .with_inner_size([1100.0, 740.0])
+        .with_min_inner_size([980.0, 480.0]);
+    if let Ok(icon) = eframe::icon_data::from_png_bytes(ICON_PNG) {
+        viewport = viewport.with_icon(Arc::new(icon));
+    }
+    let options = eframe::NativeOptions { viewport, ..Default::default() };
     eframe::run_native(
         "neuros-db",
         options,
-        Box::new(|_cc| {
-            let mut app = App::new();
+        Box::new(|cc| {
+            // No device I/O here: the window must appear first. Detection
+            // and reading the database run in the background.
+            let mut app = App::new(cc.egui_ctx.clone());
             if let Some(p) = std::env::args_os().nth(1).map(PathBuf::from) {
                 if p.is_dir() {
                     app.set_root(p);
@@ -44,6 +54,8 @@ fn main() -> eframe::Result {
                     app.raw_path = p.display().to_string();
                     app.inspect();
                 }
+            } else {
+                app.redetect();
             }
             Ok(Box::new(app))
         }),
@@ -75,6 +87,10 @@ enum Msg {
     EditsSaved(Result<WriteReport, String>),
     DupesFound(Result<Vec<DupGroup>, String>),
     DupesDeleted(Result<WriteReport, String>),
+    /// Background device detection finished.
+    Detected(Vec<PathBuf>),
+    /// Background read of the device and its database finished.
+    Loaded(Result<Box<Loaded>, String>),
     TextFixed(Result<(usize, WriteReport), String>),
 }
 
@@ -158,6 +174,14 @@ enum AddKind {
     OneFolder,
 }
 
+/// What `inspect` reads from the device, off the UI thread.
+struct Loaded {
+    info: DeviceInfo,
+    top_dirs: Vec<String>,
+    music: String,
+    tracks: Vec<Track>,
+}
+
 struct Job {
     rx: Receiver<Msg>,
     cancel: Arc<AtomicBool>,
@@ -165,6 +189,10 @@ struct Job {
 }
 
 struct App {
+    ctx: egui::Context,
+    /// `inspect` was asked for while another job ran.
+    pending_inspect: bool,
+    options_open: bool,
     mode: Mode,
     root: String,
     raw_path: String,
@@ -214,6 +242,30 @@ struct App {
     log: Vec<String>,
 }
 
+/// Install a menu entry and icon for this user (Linux). Wayland desktops
+/// take the window icon from the `.desktop` file matching the app ID.
+#[cfg(target_os = "linux")]
+fn install_desktop_entry() -> std::io::Result<PathBuf> {
+    let data = std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
+        .ok_or_else(|| std::io::Error::other("HOME is not set"))?;
+    let icon_dir = data.join("icons/hicolor/256x256/apps");
+    std::fs::create_dir_all(&icon_dir)?;
+    std::fs::write(icon_dir.join(format!("{APP_ID}.png")), ICON_PNG)?;
+    let exe = std::env::current_exe()?;
+    let apps = data.join("applications");
+    std::fs::create_dir_all(&apps)?;
+    let path = apps.join(format!("{APP_ID}.desktop"));
+    let entry = format!(
+        "[Desktop Entry]\nType=Application\nName=Neuros Database Builder\nComment=Build and manage the music database of a Neuros audio player\nExec=\"{}\" %f\nIcon={APP_ID}\nStartupWMClass={APP_ID}\nTerminal=false\nCategories=AudioVideo;Audio;Utility;\n",
+        exe.display()
+    );
+    std::fs::write(&path, entry)?;
+    Ok(path)
+}
+
 /// Mounted filesystems that look like a Neuros.
 fn detect_devices() -> Vec<PathBuf> {
     let Ok(disks) = sysinfo::Disks::new_with_refreshed_list() else { return Vec::new() };
@@ -228,8 +280,11 @@ fn detect_devices() -> Vec<PathBuf> {
 }
 
 impl App {
-    fn new() -> Self {
-        let mut app = Self {
+    fn new(ctx: egui::Context) -> Self {
+        Self {
+            ctx,
+            pending_inspect: false,
+            options_open: false,
             mode: Mode::Mounted,
             root: String::new(),
             raw_path: String::new(),
@@ -270,9 +325,7 @@ impl App {
             anchor: None,
             edit: EditBuf::default(),
             log: vec![format!("Backups go to {}", default_backup_dir().display())],
-        };
-        app.redetect();
-        app
+        }
     }
 
     fn say(&mut self, s: impl Into<String>) {
@@ -289,8 +342,22 @@ impl App {
         }
     }
 
+    /// Look for mounted Neuros devices in the background.
     fn redetect(&mut self) {
-        self.detected = detect_devices();
+        if self.job.is_some() {
+            return;
+        }
+        let (tx, rx) = channel();
+        let ctx = self.ctx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(Msg::Detected(detect_devices()));
+            ctx.request_repaint();
+        });
+        self.job = Some(Job { rx, cancel: Arc::new(AtomicBool::new(false)), label: "Looking for the Neuros" });
+    }
+
+    fn detected(&mut self, found: Vec<PathBuf>) {
+        self.detected = found;
         match self.detected.len() {
             0 => self.say("No mounted Neuros found. Plug it in and press Detect, browse to it, or switch to \"Hard disk on USB-IDE adapter\"."),
             n => {
@@ -326,44 +393,72 @@ impl App {
         self.inspect();
     }
 
+    /// Read the device and its database in the background (slow over the
+    /// Neuros's USB 1.1); `loaded` applies the result.
     fn inspect(&mut self) {
         self.info = None;
         self.open_error = None;
         self.items.clear();
         self.scanned = None;
         self.top_dirs.clear();
+        self.device_tracks.clear();
+        self.data_gen += 1;
+        self.selected.clear();
         let Some(src) = self.source() else { return };
-        match src.open(false) {
-            Ok((fs, probe)) => {
-                let info = neuros_core::inspect(fs.as_ref(), probe);
-                if let Some(e) = &info.existing_error {
-                    self.say(format!("Existing database could not be read ({e}); it will be replaced."));
-                }
-                self.top_dirs = fs
-                    .read_dir("")
-                    .map(|v| v.into_iter().filter(|e| e.is_dir).map(|e| e.name).collect())
-                    .unwrap_or_default();
-                self.top_dirs.sort_by_key(|d| d.to_lowercase());
-                self.music = vfs::find_dir_ci(fs.as_ref(), "", "MUSIC").unwrap_or_default();
-                if let Some(p) = &info.probe {
-                    self.say(format!("Opened {}", p.summary()));
-                }
-                self.artist_albums = info.artist_albums;
-                self.device_tracks = info
-                    .existing
-                    .as_ref()
-                    .map(|db| db.tracks().iter().map(|t| t.to_track()).collect())
-                    .unwrap_or_default();
-                self.data_gen += 1;
-                self.edits = info.overrides.clone();
-                self.selected.clear();
-                self.anchor = None;
-                self.edit = EditBuf::default();
-                self.view = View::Device;
-                self.info = Some(info);
-            }
-            Err(e) => self.open_error = Some(e.to_string()),
+        if self.job.is_some() {
+            self.pending_inspect = true;
+            return;
         }
+        let (tx, rx) = channel();
+        let ctx = self.ctx.clone();
+        std::thread::spawn(move || {
+            let res = src
+                .open(false)
+                .map(|(fs, probe)| {
+                    let info = neuros_core::inspect(fs.as_ref(), probe);
+                    let mut top_dirs: Vec<String> = fs
+                        .read_dir("")
+                        .map(|v| v.into_iter().filter(|e| e.is_dir).map(|e| e.name).collect())
+                        .unwrap_or_default();
+                    top_dirs.sort_by_key(|d| d.to_lowercase());
+                    let music = vfs::find_dir_ci(fs.as_ref(), "", "MUSIC").unwrap_or_default();
+                    let tracks = info
+                        .existing
+                        .as_ref()
+                        .map(|db| db.tracks().iter().map(|t| t.to_track()).collect())
+                        .unwrap_or_default();
+                    Box::new(Loaded { info, top_dirs, music, tracks })
+                })
+                .map_err(|e| e.to_string());
+            let _ = tx.send(Msg::Loaded(res));
+            ctx.request_repaint();
+        });
+        self.job = Some(Job { rx, cancel: Arc::new(AtomicBool::new(false)), label: "Reading the database" });
+    }
+
+    fn loaded(&mut self, l: Loaded) {
+        let Loaded { info, top_dirs, music, tracks } = l;
+        if let Some(e) = &info.existing_error {
+            self.say(format!("Existing database could not be read ({e}); it will be replaced."));
+        }
+        if let Some(p) = &info.probe {
+            self.say(format!("Opened {}", p.summary()));
+        }
+        self.say(match &info.existing {
+            Some(_) => format!("Read the database: {} tracks.", tracks.len()),
+            None => "No database on the device yet.".into(),
+        });
+        self.top_dirs = top_dirs;
+        self.music = music;
+        self.artist_albums = info.artist_albums;
+        self.device_tracks = tracks;
+        self.data_gen += 1;
+        self.edits = info.overrides.clone();
+        self.selected.clear();
+        self.anchor = None;
+        self.edit = EditBuf::default();
+        self.view = View::Device;
+        self.info = Some(info);
     }
 
     fn drive(&self) -> Drive {
@@ -485,6 +580,17 @@ impl App {
                             }
                         }
                         Err(e) => self.say(format!("Compare failed: {e}")),
+                    }
+                }
+                Msg::Detected(found) => {
+                    self.job = None;
+                    self.detected(found);
+                }
+                Msg::Loaded(r) => {
+                    self.job = None;
+                    match r {
+                        Ok(l) => self.loaded(*l),
+                        Err(e) => self.open_error = Some(e),
                     }
                 }
                 Msg::DupesFound(r) => {
@@ -632,245 +738,26 @@ impl App {
                 }
             }
         }
+        // An inspect asked for while busy runs once the job is done.
+        if self.job.is_none() && self.pending_inspect {
+            self.pending_inspect = false;
+            self.inspect();
+        }
     }
 
-    fn source_row(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.label("Connection:");
-            let before = self.mode;
-            ui.radio_value(&mut self.mode, Mode::Mounted, "Neuros over USB (mounted)");
-            ui.radio_value(&mut self.mode, Mode::Raw, "Hard disk on USB-IDE adapter / disk image")
-                .on_hover_text("The Neuros stores its disk byte-swapped, so the OS can't mount it when the drive is connected directly. This mode reads and writes it with a built-in FAT driver.");
-            if self.mode != before {
-                if self.mode == Mode::Raw && self.raw_disks.is_empty() {
-                    self.refresh_raw_disks();
-                }
-                self.inspect();
-            }
-        });
-
-        egui::Grid::new("paths").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
-            match self.mode {
-                Mode::Mounted => {
-                    ui.label("Neuros device:");
-                    ui.horizontal(|ui| {
-                        let r = ui.add(
-                            egui::TextEdit::singleline(&mut self.root)
-                                .desired_width(380.0)
-                                .hint_text("mount point, e.g. /run/media/you/NEUROS"),
-                        );
-                        if r.lost_focus() {
-                            self.inspect();
-                        }
-                        if ui.button("Browse…").clicked()
-                            && let Some(p) = rfd::FileDialog::new().set_title("Select the Neuros drive").pick_folder()
-                        {
-                            self.set_root(p);
-                        }
-                        if ui.button("Detect").clicked() {
-                            self.redetect();
-                        }
-                        if self.detected.len() > 1 {
-                            let mut pick = None;
-                            egui::ComboBox::from_id_salt("detected").selected_text("Found…").show_ui(ui, |ui| {
-                                for d in &self.detected {
-                                    if ui.selectable_label(false, d.display().to_string()).clicked() {
-                                        pick = Some(d.clone());
-                                    }
-                                }
-                            });
-                            if let Some(p) = pick {
-                                self.set_root(p);
-                            }
-                        }
-                    });
-                    ui.end_row();
-                }
-                Mode::Raw => {
-                    ui.label("Disk:");
-                    ui.horizontal(|ui| {
-                        let mut pick = None;
-                        let sel = if self.raw_path.is_empty() {
-                            "Choose a disk…".to_string()
-                        } else {
-                            self.raw_path.clone()
-                        };
-                        egui::ComboBox::from_id_salt("rawdisk").selected_text(sel).width(380.0).show_ui(ui, |ui| {
-                            for d in &self.raw_disks {
-                                let tag = match (&d.probe, &d.error) {
-                                    (Some(p), _) if p.swapped => "  ✔ Neuros (byte-swapped FAT)".to_string(),
-                                    (Some(p), _) => format!("  {} (normal byte order)", p.fat_type),
-                                    (None, Some(e)) if e.contains("permission") => "  (no permission)".into(),
-                                    _ => "  (no FAT filesystem)".into(),
-                                };
-                                let enabled = d.probe.is_some();
-                                let label = format!("{}  {}{tag}", d.path.display(), d.description);
-                                if ui.add_enabled(enabled, egui::Button::selectable(false, label)).clicked() {
-                                    pick = Some(d.path.display().to_string());
-                                }
-                            }
-                            if self.raw_disks.is_empty() {
-                                ui.label("No unmounted disks found.");
-                            }
-                        });
-                        if let Some(p) = pick {
-                            self.raw_path = p;
-                            self.inspect();
-                        }
-                        if ui.button("Refresh").clicked() {
-                            self.refresh_raw_disks();
-                        }
-                        if ui.button("Image file…").clicked()
-                            && let Some(p) = rfd::FileDialog::new().set_title("Disk image").pick_file()
-                        {
-                            self.raw_path = p.display().to_string();
-                            self.inspect();
-                        }
-                        ui.label("Byte order:");
-                        let before = self.swap;
-                        egui::ComboBox::from_id_salt("swap")
-                            .selected_text(match self.swap {
-                                SwapMode::Auto => "Auto-detect",
-                                SwapMode::Swapped => "Swapped (Neuros)",
-                                SwapMode::Normal => "Normal",
-                            })
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut self.swap, SwapMode::Auto, "Auto-detect");
-                                ui.selectable_value(&mut self.swap, SwapMode::Swapped, "Swapped (Neuros)");
-                                ui.selectable_value(&mut self.swap, SwapMode::Normal, "Normal");
-                            });
-                        if self.swap != before {
-                            self.inspect();
-                        }
-                    });
-                    ui.end_row();
-                }
-            }
-
-            ui.label("Music folder:");
-            ui.horizontal(|ui| {
-                ui.add(egui::TextEdit::singleline(&mut self.music).desired_width(380.0).hint_text("(whole device)"))
-                    .on_hover_text("Folder on the device to scan, relative to its root.");
-                let mut pick = None;
-                egui::ComboBox::from_id_salt("topdirs").selected_text("Folders…").show_ui(ui, |ui| {
-                    if ui.selectable_label(false, "(whole device)").clicked() {
-                        pick = Some(String::new());
-                    }
-                    for d in &self.top_dirs {
-                        if ui.selectable_label(false, d).clicked() {
-                            pick = Some(d.clone());
-                        }
-                    }
-                });
-                if let Some(p) = pick {
-                    self.music = p;
-                }
-                if self.mode == Mode::Mounted && ui.button("Browse…").clicked() {
-                    let mut d = rfd::FileDialog::new().set_title("Folder on the Neuros to scan");
-                    if !self.root.is_empty() {
-                        d = d.set_directory(&self.root);
-                    }
-                    if let Some(p) = d.pick_folder() {
-                        match p.strip_prefix(&self.root) {
-                            Ok(rel) => self.music = normalize_rel(&rel.to_string_lossy()),
-                            Err(_) => self.say(format!("{} is not on the device", p.display())),
-                        }
-                    }
-                }
-            });
-            ui.end_row();
-        });
-    }
-
+    /// Top area: where the Neuros is, what it is, and what to do with it.
     fn device_panel(&mut self, ui: &mut egui::Ui) {
         let busy = self.busy();
         ui.add_enabled_ui(!busy, |ui| self.source_row(ui));
-
-        if let Some(e) = &self.open_error {
-            ui.colored_label(ui.visuals().error_fg_color, e);
-        }
-        if let Some(info) = &self.info {
-            let mut parts = vec![];
-            parts.push(format!("Serial: {}", info.serial.as_deref().unwrap_or("–")));
-            parts.push(format!("Firmware: {}", info.firmware.as_deref().unwrap_or("–")));
-            if let Some(b) = info.total_bytes {
-                parts.push(if b >= 1 << 30 {
-                    format!("{:.1} GB", b as f64 / (1u64 << 30) as f64)
-                } else {
-                    format!("{} MB", b >> 20)
-                });
-            }
-            if let Some(p) = &info.probe {
-                parts.push(if p.swapped { "byte-swapped".into() } else { "normal byte order".into() });
-            }
-            parts.push(match &info.existing {
-                Some(db) => format!("Current database: {} tracks", db.tracks().len()),
-                None if info.existing_error.is_some() => "Current database: unreadable".into(),
-                None => "No database yet".into(),
-            });
-            ui.label(parts.join("   ·   "));
-            if !info.looks_like_neuros() {
-                ui.colored_label(
-                    ui.visuals().warn_fg_color,
-                    "This doesn't look like a Neuros (no sn.txt or WOID_DB). A database will still be created here if you write.",
-                );
-            }
-        }
-
-        ui.add_enabled_ui(!busy, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                let auto = self
-                    .info
-                    .as_ref()
-                    .map(|i| format!("Auto ({}, {})", i.drive.prefix(), i.drive_reason))
-                    .unwrap_or("Auto".into());
-                ui.label("Paths:");
-                egui::ComboBox::from_id_salt("drive")
-                    .selected_text(match self.drive_choice {
-                        DriveChoice::Auto => auto.clone(),
-                        DriveChoice::C => "C: (hard disk)".into(),
-                        DriveChoice::D => "D: (flash)".into(),
-                    })
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut self.drive_choice, DriveChoice::Auto, auto);
-                        ui.selectable_value(&mut self.drive_choice, DriveChoice::C, "C: (hard disk)");
-                        ui.selectable_value(&mut self.drive_choice, DriveChoice::D, "D: (flash)");
-                    })
-                    .response
-                    .on_hover_text("The Neuros stores paths as C:/… on the hard-disk backpack and D:/… on internal flash.");
-                ui.separator();
-                ui.checkbox(&mut self.include_recordings, "Include recordings (WOID_RECORD)");
-                ui.checkbox(&mut self.placeholders, "\"Unknown Artist\" for untagged")
-                    .on_hover_text("Untagged tracks still appear under Artists / Albums / Genres.");
-                ui.checkbox(&mut self.ignore_the, "Sort \"The X\" under X");
-                ui.checkbox(&mut self.rename_files, "Rename non-ASCII files").on_hover_text(
-                    "The Neuros locks up on file names with accented or non-Latin characters. If off, those files are left out.",
-                );
-                ui.checkbox(&mut self.backup, "Back up old database");
-                let why = self.info.as_ref().map(|i| i.artist_albums_reason.clone()).unwrap_or_default();
-                ui.checkbox(&mut self.artist_albums, "Artist → Album menu").on_hover_text(format!(
-                    "Adds Albums → Artists browsing (firmware 2.14 and newer). Suggested: {} ({why}).",
-                    if self.info.as_ref().is_some_and(|i| i.artist_albums) { "on" } else { "off" }
-                ));
-            });
-        });
-
+        ui.add_space(2.0);
+        self.facts_row(ui);
+        ui.separator();
         ui.horizontal(|ui| {
-            let can_scan = !busy && self.info.is_some();
-            if ui.add_enabled(can_scan, egui::Button::new("🔍 Scan")).clicked() {
-                let ctx = ui.ctx().clone();
-                self.start_scan(&ctx);
-            }
-            let fresh = self.scanned.is_some() && self.scanned == self.source();
-            let can_write = !busy && fresh && !self.items.is_empty();
-            if ui.add_enabled(can_write, egui::Button::new("💾 Write database to Neuros")).clicked() {
-                self.confirm_write = true;
-            }
-            ui.separator();
             let can_add = !busy && self.info.is_some();
+            let has_db = self.info.as_ref().is_some_and(|i| i.existing.is_some());
             if ui
                 .add_enabled(can_add, egui::Button::new("➕ Add files…"))
-                .on_hover_text("Copy MP3/Ogg files onto the Neuros and add them to the database. You can also drop files or folders onto this window.")
+                .on_hover_text("Copy MP3/Ogg files onto the Neuros and add them to the database. You can also drop files or folders onto the window.")
                 .clicked()
                 && let Some(files) = pick_audio_files()
             {
@@ -878,7 +765,7 @@ impl App {
             }
             if ui
                 .add_enabled(can_add, egui::Button::new("📁 Add folders…"))
-                .on_hover_text("Copy every MP3/Ogg file in the chosen folders (and their subfolders) onto the Neuros.")
+                .on_hover_text("Copy every MP3/Ogg file in the chosen folders, subfolders included.")
                 .clicked()
                 && let Some(dirs) = pick_music_folders()
             {
@@ -900,9 +787,9 @@ impl App {
                     skip_dupes: true,
                 });
             }
-            let has_db = self.info.as_ref().is_some_and(|i| i.existing.is_some());
+            ui.separator();
             if ui
-                .add_enabled(can_add && has_db, egui::Button::new("🧹 Find duplicates…"))
+                .add_enabled(can_add && has_db, egui::Button::new("🧹 Duplicates…"))
                 .on_hover_text("Find songs that are on the Neuros more than once and remove the extra copies.")
                 .clicked()
             {
@@ -911,7 +798,7 @@ impl App {
                 self.start_find_dupes(&ctx);
             }
             if ui
-                .add_enabled(can_add && has_db, egui::Button::new("✒ Fix \"?\" in text…"))
+                .add_enabled(can_add && has_db, egui::Button::new("✒ Fix \"?\"…"))
                 .on_hover_text("Old taggers saved apostrophes and dashes as \"?\" (Don?t, 80?85). Repair them in the database.")
                 .clicked()
             {
@@ -922,22 +809,313 @@ impl App {
                     self.text_fixes = Some(changes);
                 }
             }
-            if let Some(job) = &self.job {
-                ui.spinner();
-                let (d, t) = self.progress;
-                if t > 0 {
-                    let text = if job.label == "Copying" {
-                        format!("Copying {:.1} / {:.1} MB", d as f64 / 1024.0, t as f64 / 1024.0)
-                    } else {
-                        format!("{} {d}/{t}", job.label)
-                    };
-                    ui.add(egui::ProgressBar::new(d as f32 / t as f32).desired_width(240.0).text(text));
+            ui.separator();
+            if ui
+                .add_enabled(can_add, egui::Button::new("🔍 Scan device"))
+                .on_hover_text("Read every MP3/Ogg file on the Neuros. Then Write builds a fresh database from them.")
+                .clicked()
+            {
+                let ctx = ui.ctx().clone();
+                self.start_scan(&ctx);
+            }
+            let fresh = self.scanned.is_some() && self.scanned == self.source();
+            let can_write = !busy && fresh && !self.items.is_empty();
+            if ui
+                .add_enabled(can_write, egui::Button::new("💾 Write database"))
+                .on_hover_text("Replace the database on the Neuros with the scan results.")
+                .on_disabled_hover_text("Scan the device first.")
+                .clicked()
+            {
+                self.confirm_write = true;
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.toggle_value(&mut self.options_open, "⚙ Options");
+            });
+        });
+        ui.add_space(2.0);
+    }
+
+    /// Connection type and device.
+    fn source_row(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            let before = self.mode;
+            egui::ComboBox::from_id_salt("mode")
+                .width(210.0)
+                .selected_text(match self.mode {
+                    Mode::Mounted => "Neuros over USB",
+                    Mode::Raw => "Hard disk on USB-IDE adapter",
+                })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut self.mode, Mode::Mounted, "Neuros over USB")
+                        .on_hover_text("The Neuros on its own USB port, mounted by the computer.");
+                    ui.selectable_value(&mut self.mode, Mode::Raw, "Hard disk on USB-IDE adapter")
+                        .on_hover_text("The Neuros hard disk connected directly, or a disk image. Its contents are byte-swapped, so the computer can't mount it; this reads and writes it directly.");
+                });
+            if self.mode != before {
+                if self.mode == Mode::Raw && self.raw_disks.is_empty() {
+                    self.refresh_raw_disks();
+                }
+                self.inspect();
+            }
+            match self.mode {
+                Mode::Mounted => {
+                    let r = ui.add(
+                        egui::TextEdit::singleline(&mut self.root)
+                            .desired_width(360.0)
+                            .hint_text("mount point, e.g. /run/media/you/NEUROS"),
+                    );
+                    if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        self.inspect();
+                    }
+                    if ui.button("Browse…").clicked()
+                        && let Some(p) = rfd::FileDialog::new().set_title("Select the Neuros drive").pick_folder()
+                    {
+                        self.set_root(p);
+                    }
+                    if ui.button("⟳ Detect").on_hover_text("Look for a mounted Neuros").clicked() {
+                        self.redetect();
+                    }
+                    if self.detected.len() > 1 {
+                        let mut pick = None;
+                        egui::ComboBox::from_id_salt("detected").selected_text("Found…").show_ui(ui, |ui| {
+                            for d in &self.detected {
+                                if ui.selectable_label(false, d.display().to_string()).clicked() {
+                                    pick = Some(d.clone());
+                                }
+                            }
+                        });
+                        if let Some(p) = pick {
+                            self.set_root(p);
+                        }
+                    }
+                }
+                Mode::Raw => {
+                    let mut pick = None;
+                    let sel = if self.raw_path.is_empty() { "Choose a disk…".to_string() } else { self.raw_path.clone() };
+                    egui::ComboBox::from_id_salt("rawdisk").selected_text(sel).width(360.0).show_ui(ui, |ui| {
+                        for d in &self.raw_disks {
+                            let tag = match (&d.probe, &d.error) {
+                                (Some(p), _) if p.swapped => "  ✔ Neuros (byte-swapped FAT)".to_string(),
+                                (Some(p), _) => format!("  {} (normal byte order)", p.fat_type),
+                                (None, Some(e)) if e.contains("permission") => "  (no permission)".into(),
+                                _ => "  (no FAT filesystem)".into(),
+                            };
+                            let label = format!("{}  {}{tag}", d.path.display(), d.description);
+                            if ui.add_enabled(d.probe.is_some(), egui::Button::selectable(false, label)).clicked() {
+                                pick = Some(d.path.display().to_string());
+                            }
+                        }
+                        if self.raw_disks.is_empty() {
+                            ui.label("No unmounted disks found.");
+                        }
+                    });
+                    if let Some(p) = pick {
+                        self.raw_path = p;
+                        self.inspect();
+                    }
+                    if ui.button("⟳ Refresh").clicked() {
+                        self.refresh_raw_disks();
+                    }
+                    if ui.button("Image file…").clicked()
+                        && let Some(p) = rfd::FileDialog::new().set_title("Disk image").pick_file()
+                    {
+                        self.raw_path = p.display().to_string();
+                        self.inspect();
+                    }
+                }
+            }
+        });
+    }
+
+    /// One quiet line about the open device.
+    fn facts_row(&mut self, ui: &mut egui::Ui) {
+        if let Some(e) = &self.open_error {
+            ui.colored_label(ui.visuals().error_fg_color, e);
+            return;
+        }
+        let Some(info) = &self.info else {
+            ui.weak(if self.busy() { "…" } else { "No device open." });
+            return;
+        };
+        let mut parts = vec![];
+        if let Some(sn) = &info.serial {
+            parts.push(format!("Serial {sn}"));
+        }
+        if let Some(fw) = &info.firmware {
+            parts.push(format!("firmware {}", fw.trim()));
+        }
+        if let Some(b) = info.total_bytes {
+            parts.push(if b >= 1 << 30 {
+                format!("{:.1} GB", b as f64 / (1u64 << 30) as f64)
+            } else {
+                format!("{} MB", b >> 20)
+            });
+        }
+        if info.probe.as_ref().is_some_and(|p| p.swapped) {
+            parts.push("byte-swapped disk".into());
+        }
+        parts.push(match &info.existing {
+            Some(_) => format!("{} tracks in the database", self.device_tracks.len()),
+            None if info.existing_error.is_some() => "database unreadable".into(),
+            None => "no database yet".into(),
+        });
+        ui.horizontal(|ui| {
+            ui.weak(parts.join("  ·  "));
+            if !info.looks_like_neuros() {
+                ui.colored_label(ui.visuals().warn_fg_color, "  ⚠ doesn't look like a Neuros (no sn.txt or WOID_DB)");
+            }
+        });
+    }
+
+    /// The Options window: settings for building the database.
+    fn options_window(&mut self, ctx: &egui::Context) {
+        let mut open = self.options_open;
+        let busy = self.busy();
+        // Same label column in every section, so the controls line up.
+        const OPT_LABEL_W: f32 = 96.0;
+        egui::Window::new("Options")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::RIGHT_TOP, [-10.0, 96.0])
+            .show(ctx, |ui| {
+            ui.add_enabled_ui(!busy, |ui| {
+                ui.strong("Scanning");
+                egui::Grid::new("opt_scan").num_columns(2).min_col_width(OPT_LABEL_W).spacing([12.0, 6.0]).show(ui, |ui| {
+                    ui.label("Music folder");
+                    ui.horizontal(|ui| {
+                        ui.add(egui::TextEdit::singleline(&mut self.music).desired_width(200.0).hint_text("(whole device)"))
+                            .on_hover_text("Folder on the Neuros to scan.");
+                        let mut pick = None;
+                        egui::ComboBox::from_id_salt("topdirs").selected_text("…").width(40.0).show_ui(ui, |ui| {
+                            if ui.selectable_label(false, "(whole device)").clicked() {
+                                pick = Some(String::new());
+                            }
+                            for d in &self.top_dirs {
+                                if ui.selectable_label(false, d).clicked() {
+                                    pick = Some(d.clone());
+                                }
+                            }
+                        });
+                        if let Some(p) = pick {
+                            self.music = p;
+                        }
+                    });
+                    ui.end_row();
+                    ui.label("");
+                    ui.checkbox(&mut self.include_recordings, "Include recordings (WOID_RECORD)");
+                    ui.end_row();
+                    ui.label("");
+                    ui.checkbox(&mut self.placeholders, "\"Unknown Artist\" for untagged files")
+                        .on_hover_text("Untagged tracks still appear under Artists / Albums / Genres.");
+                    ui.end_row();
+                    ui.label("");
+                    ui.checkbox(&mut self.rename_files, "Rename non-ASCII file names").on_hover_text(
+                        "The Neuros locks up on file names with accented or non-Latin characters. If off, those files are left out.",
+                    );
+                    ui.end_row();
+                });
+                ui.add_space(6.0);
+                ui.strong("Database");
+                egui::Grid::new("opt_db").num_columns(2).min_col_width(OPT_LABEL_W).spacing([12.0, 6.0]).show(ui, |ui| {
+                    let auto = self
+                        .info
+                        .as_ref()
+                        .map(|i| format!("Auto ({}, {})", i.drive.prefix(), i.drive_reason))
+                        .unwrap_or("Auto".into());
+                    ui.label("Paths");
+                    egui::ComboBox::from_id_salt("drive")
+                        .width(260.0)
+                        .selected_text(match self.drive_choice {
+                            DriveChoice::Auto => auto.clone(),
+                            DriveChoice::C => "C: (hard disk)".into(),
+                            DriveChoice::D => "D: (flash)".into(),
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut self.drive_choice, DriveChoice::Auto, auto);
+                            ui.selectable_value(&mut self.drive_choice, DriveChoice::C, "C: (hard disk)");
+                            ui.selectable_value(&mut self.drive_choice, DriveChoice::D, "D: (flash)");
+                        })
+                        .response
+                        .on_hover_text("The Neuros stores paths as C:/… on the hard disk and D:/… on internal flash.");
+                    ui.end_row();
+                    ui.label("");
+                    let why = self.info.as_ref().map(|i| i.artist_albums_reason.clone()).unwrap_or_default();
+                    ui.checkbox(&mut self.artist_albums, "Albums → Artists menu").on_hover_text(format!(
+                        "For firmware 2.14 and newer. Suggested: {} ({why}).",
+                        if self.info.as_ref().is_some_and(|i| i.artist_albums) { "on" } else { "off" }
+                    ));
+                    ui.end_row();
+                    ui.label("");
+                    ui.checkbox(&mut self.ignore_the, "Sort \"The X\" under X");
+                    ui.end_row();
+                    ui.label("");
+                    ui.checkbox(&mut self.backup, "Back up the old database before writing");
+                    ui.end_row();
+                });
+                ui.add_space(6.0);
+                ui.strong("Hard disk on USB-IDE adapter");
+                egui::Grid::new("opt_raw").num_columns(2).min_col_width(OPT_LABEL_W).spacing([12.0, 6.0]).show(ui, |ui| {
+                    ui.label("Byte order");
+                    let before = self.swap;
+                    egui::ComboBox::from_id_salt("swap")
+                        .width(260.0)
+                        .selected_text(match self.swap {
+                            SwapMode::Auto => "Auto-detect",
+                            SwapMode::Swapped => "Swapped (Neuros)",
+                            SwapMode::Normal => "Normal",
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut self.swap, SwapMode::Auto, "Auto-detect");
+                            ui.selectable_value(&mut self.swap, SwapMode::Swapped, "Swapped (Neuros)");
+                            ui.selectable_value(&mut self.swap, SwapMode::Normal, "Normal");
+                        });
+                    if self.swap != before && self.mode == Mode::Raw {
+                        self.inspect();
+                    }
+                    ui.end_row();
+                });
+                #[cfg(target_os = "linux")]
+                {
+                    ui.add_space(6.0);
+                    ui.strong("Desktop");
+                    if ui
+                        .button("Add to the application menu")
+                        .on_hover_text("Installs a menu entry and the icon for your user (also shows the icon on Wayland).")
+                        .clicked()
+                    {
+                        match install_desktop_entry() {
+                            Ok(p) => self.say(format!("Added menu entry {}", p.display())),
+                            Err(e) => self.say(format!("Could not add the menu entry: {e}")),
+                        }
+                    }
+                }
+            });
+        });
+        self.options_open = open;
+    }
+
+    /// Progress of the running job.
+    fn status_bar(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            let Some(job) = &self.job else {
+                ui.weak("Ready");
+                return;
+            };
+            ui.spinner();
+            let (d, t) = self.progress;
+            if t > 0 {
+                let text = if job.label == "Copying" {
+                    format!("Copying {:.1} / {:.1} MB", d as f64 / 1024.0, t as f64 / 1024.0)
                 } else {
-                    ui.label(format!("{}…", job.label));
-                }
-                if job.label == "Scanning" && ui.button("Cancel").clicked() {
-                    job.cancel.store(true, Ordering::Relaxed);
-                }
+                    format!("{} {d}/{t}", job.label)
+                };
+                ui.add(egui::ProgressBar::new(d as f32 / t as f32).desired_width(320.0).text(text));
+            } else {
+                ui.label(format!("{}…", job.label));
+            }
+            if job.label == "Scanning" && ui.button("Cancel").clicked() {
+                job.cancel.store(true, Ordering::Relaxed);
             }
         });
     }
@@ -2376,7 +2554,8 @@ impl eframe::App for App {
             self.device_panel(ui);
             ui.add_space(4.0);
         });
-        egui::Panel::bottom("log").resizable(true).default_size(110.0).show(ui, |ui| {
+        egui::Panel::bottom("status").show(ui, |ui| self.status_bar(ui));
+        egui::Panel::bottom("log").resizable(true).default_size(100.0).show(ui, |ui| {
             egui::ScrollArea::vertical().stick_to_bottom(true).auto_shrink([false, false]).show(ui, |ui| {
                 for l in &self.log {
                     ui.monospace(l);
@@ -2412,18 +2591,32 @@ impl eframe::App for App {
                 View::Scan if !self.items.is_empty() => self.table(ui),
                 View::Device if !self.device_tracks.is_empty() => self.device_table(ui),
                 _ => {
-                    ui.centered_and_justified(|ui| {
-                        ui.label(if self.busy() {
-                            "Working…"
-                        } else if self.info.is_none() {
-                            "Choose the Neuros."
-                        } else {
-                            "No database on the device yet. Press Scan, then Write — or Add music / Sync from PC."
-                        });
+                    let label = self.job.as_ref().map(|j| j.label);
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(ui.available_height() / 3.0);
+                        match label {
+                            Some(l) => {
+                                ui.add(egui::Spinner::new().size(36.0));
+                                ui.add_space(8.0);
+                                ui.heading(format!("{l}…"));
+                                if l == "Reading the database" {
+                                    ui.weak("Over the Neuros's own USB (1.1) this can take a minute.");
+                                }
+                            }
+                            None if self.info.is_none() => {
+                                ui.heading("No Neuros open");
+                                ui.weak("Plug it in and press ⟳ Detect, use Browse…, or choose \"Hard disk on USB-IDE adapter\".");
+                            }
+                            None => {
+                                ui.heading("No database on the Neuros yet");
+                                ui.weak("Press 🔍 Scan device, then 💾 Write database, or use Add / Sync from PC.");
+                            }
+                        }
                     });
                 }
             }
         });
+        self.options_window(&ctx);
         self.confirm_dialog(&ctx);
         self.add_dialog(&ctx);
         self.sync_dialog(&ctx);
