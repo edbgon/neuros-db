@@ -6,8 +6,9 @@
   background with a progress indicator (slow over the Neuros's USB 1.1).
 - Tidier main window: fixed toolbar, settings moved to an Options window,
   status bar.
-- App icon. On Linux, *Options → Add to the application menu* installs a menu
-  entry, which also shows the icon on Wayland.
+- App icon, also on Wayland: on Linux the icon and a hidden `.desktop` entry
+  are installed for the user at startup. *Options → Add to the application
+  menu* adds it to the menu.
 
 ## [0.1.0-beta.1] - 2026-11-25
 

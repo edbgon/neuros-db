@@ -50,11 +50,11 @@ fn track(title: &str, artist: Option<&str>, album: Option<&str>, n: u32) -> Trac
 #[test]
 fn build_roundtrip_and_ordering() {
     let tracks = vec![
-        track("Zebra", Some("The Band"), Some("Second"), 2),
-        track("apple", Some("ABBA"), Some("First"), 1),
-        track("Mango", Some("abba"), Some("First"), 3), // same artist, other case
+        track("Zebra", Some("The Bunch"), Some("Second"), 2),
+        track("apple", Some("Acme"), Some("First"), 1),
+        track("Mango", Some("acme"), Some("First"), 3), // same artist, other case
         track("Kiwi", None, None, 1),
-        track("Banana", Some("ABBA"), Some("First"), 2),
+        track("Banana", Some("Acme"), Some("First"), 2),
     ];
     let files = build_audio(&tracks, &BuildOptions::default()).unwrap();
     let db = load_database_from_files(&files, "audio").unwrap();
@@ -64,17 +64,17 @@ fn build_roundtrip_and_ordering() {
     let titles: Vec<_> = got.iter().map(|t| t.title.as_str()).collect();
     assert_eq!(titles, ["apple", "Banana", "Kiwi", "Mango", "Zebra"]);
     let mango = got.iter().find(|t| t.title == "Mango").unwrap();
-    assert_eq!(mango.keys[1], ["ABBA"]); // merged case-insensitively
+    assert_eq!(mango.keys[1], ["Acme"]); // merged case-insensitively
     assert_eq!(mango.time, 183);
     assert_eq!(mango.size_kb, 4003);
     assert_eq!(mango.path, "C:/MUSIC/Mango.mp3");
     let kiwi = got.iter().find(|t| t.title == "Kiwi").unwrap();
     assert!(kiwi.keys[1].is_empty() && kiwi.keys[0].is_empty());
 
-    // Artist list order: ABBA before "The Band" (sorted as "Band").
+    // Artist list order: Acme before "The Bunch" (sorted as "Bunch").
     let artist = &db.children[1];
     let names: Vec<_> = artist.sai.iter().filter_map(|e| artist.mdb.records[&e.mdb].primary()).collect();
-    assert_eq!(names, ["ABBA", "The Band"]);
+    assert_eq!(names, ["Acme", "The Bunch"]);
 
     // Album "First" lists tracks by track number: apple(1), Banana(2), Mango(3).
     let albums = &db.children[2];

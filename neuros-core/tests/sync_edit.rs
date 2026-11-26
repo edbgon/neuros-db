@@ -72,13 +72,13 @@ fn sync_then_edit_and_edits_survive_rebuilds() {
     std::fs::write(root.join("sn.txt"), "1").unwrap();
     // On the Neuros already: one file that is also on the PC (same), one
     // only on the Neuros, and a recording outside MUSIC.
-    put(&root.join("MUSIC/ABBA/Gold/SOS.mp3"), &fake_mp3("SOS", "ABBA", "Gold", 2, 50));
+    put(&root.join("MUSIC/Acme/Daybreak/Ping.mp3"), &fake_mp3("Ping", "Acme", "Daybreak", 2, 50));
     put(&root.join("MUSIC/Old/gone.mp3"), &fake_mp3("Gone", "Old", "Old", 1, 20));
     put(&root.join("WOID_RECORD/Mic 1.mp3"), &fake_mp3("Mic 1", "", "", 0, 10));
     // On the PC.
-    put(&pc.path().join("ABBA/Gold/SOS.mp3"), &fake_mp3("SOS", "ABBA", "Gold", 2, 50));
-    put(&pc.path().join("ABBA/Gold/DQ.mp3"), &fake_mp3("Dancing Queen", "ABBA", "Gold", 1, 60));
-    put(&pc.path().join("Björk/Jóga.mp3"), &fake_mp3("Joga", "Bjork", "Homogenic", 1, 30));
+    put(&pc.path().join("Acme/Daybreak/Ping.mp3"), &fake_mp3("Ping", "Acme", "Daybreak", 2, 50));
+    put(&pc.path().join("Acme/Daybreak/PB.mp3"), &fake_mp3("Paper Boat", "Acme", "Daybreak", 1, 60));
+    put(&pc.path().join("Ölmo/Fjúk.mp3"), &fake_mp3("Fjuk", "Olmo", "Lowland", 1, 30));
 
     // Plan.
     let (fs, _) = Source::Mounted(root.to_path_buf()).open(false).unwrap();
@@ -90,36 +90,36 @@ fn sync_then_edit_and_edits_survive_rebuilds() {
         plan.extra,
         [("MUSIC/Old/gone.mp3".to_string(), std::fs::metadata(root.join("MUSIC/Old/gone.mp3")).unwrap().len())]
     );
-    assert!(plan.entries.iter().any(|e| e.dest == "MUSIC/Bjork/Joga.mp3"));
+    assert!(plan.entries.iter().any(|e| e.dest == "MUSIC/Olmo/Fjuk.mp3"));
     drop(fs);
 
     // Sync without deleting: no database yet, so the device is scanned first.
     let r = sync(root, pc.path(), false);
     assert_eq!(r.added.len(), 2);
     assert!(root.join("MUSIC/Old/gone.mp3").exists());
-    assert_eq!(titles(root), ["Dancing Queen|ABBA", "Gone|Old", "Joga|Bjork", "Mic 1|", "SOS|ABBA"]);
+    assert_eq!(titles(root), ["Fjuk|Olmo", "Gone|Old", "Mic 1|", "Paper Boat|Acme", "Ping|Acme"]);
 
     // Change a file on the PC (re-tag + size change) and sync with delete.
-    put(&pc.path().join("ABBA/Gold/SOS.mp3"), &fake_mp3("S.O.S.", "ABBA", "Gold", 2, 55));
+    put(&pc.path().join("Acme/Daybreak/Ping.mp3"), &fake_mp3("P.I.N.G.", "Acme", "Daybreak", 2, 55));
     let r = sync(root, pc.path(), true);
-    assert_eq!(r.added, ["MUSIC/ABBA/Gold/SOS.mp3"]);
+    assert_eq!(r.added, ["MUSIC/Acme/Daybreak/Ping.mp3"]);
     assert_eq!(r.deleted, ["MUSIC/Old/gone.mp3"]);
     assert!(!root.join("MUSIC/Old").exists(), "empty folder removed");
-    assert_eq!(titles(root), ["Dancing Queen|ABBA", "Joga|Bjork", "Mic 1|", "S.O.S.|ABBA"]);
+    assert_eq!(titles(root), ["Fjuk|Olmo", "Mic 1|", "P.I.N.G.|Acme", "Paper Boat|Acme"]);
 
     // Edit: rename an artist on two tracks, fix a title.
     let (fs, _) = Source::Mounted(root.to_path_buf()).open(true).unwrap();
     let info = neuros_core::inspect(fs.as_ref(), None);
     let mut ed = info.overrides.clone();
-    for p in ["C:/MUSIC/ABBA/Gold/DQ.mp3", "C:/MUSIC/ABBA/Gold/SOS.mp3"] {
-        ed.set(p, Field::Artist, "ABBA (Sweden)");
+    for p in ["C:/MUSIC/Acme/Daybreak/PB.mp3", "C:/MUSIC/Acme/Daybreak/Ping.mp3"] {
+        ed.set(p, Field::Artist, "Acme (Sweden)");
     }
-    ed.set("C:/MUSIC/Bjork/Joga.mp3", Field::Title, "Jóga");
+    ed.set("C:/MUSIC/Olmo/Fjuk.mp3", Field::Title, "Fjúk");
     let r = neuros_core::device::save_edits(fs.as_ref(), &info, &ed, &wopts()).unwrap();
     fs.finish().unwrap();
     assert_eq!(r.edited_tracks, 3);
-    let expect = ["Dancing Queen|ABBA (Sweden)", "Joga|Bjork", "Mic 1|", "S.O.S.|ABBA (Sweden)"];
-    assert_eq!(titles(root), expect); // "Jóga" stored ASCII-safe
+    let expect = ["Fjuk|Olmo", "Mic 1|", "P.I.N.G.|Acme (Sweden)", "Paper Boat|Acme (Sweden)"];
+    assert_eq!(titles(root), expect); // "Fjúk" stored ASCII-safe
 
     // Edits survive a re-sync and a full rescan + write.
     sync(root, pc.path(), true);
@@ -136,7 +136,7 @@ fn sync_then_edit_and_edits_survive_rebuilds() {
     // Clearing the edits goes back to the file tags.
     let info = neuros_core::inspect(fs.as_ref(), None);
     let mut ed = info.overrides.clone();
-    for p in ["C:/MUSIC/ABBA/Gold/DQ.mp3", "C:/MUSIC/ABBA/Gold/SOS.mp3", "C:/MUSIC/Bjork/Joga.mp3"] {
+    for p in ["C:/MUSIC/Acme/Daybreak/PB.mp3", "C:/MUSIC/Acme/Daybreak/Ping.mp3", "C:/MUSIC/Olmo/Fjuk.mp3"] {
         ed.clear(p);
     }
     assert!(ed.is_empty());
@@ -146,7 +146,7 @@ fn sync_then_edit_and_edits_survive_rebuilds() {
     neuros_core::device::save_edits(fs.as_ref(), &info, &ed, &wopts()).unwrap();
     let info = neuros_core::inspect(fs.as_ref(), None);
     neuros_core::write_database(fs.as_ref(), &info, &items, &wopts()).unwrap();
-    assert_eq!(titles(root), ["Dancing Queen|ABBA", "Joga|Bjork", "Mic 1|", "S.O.S.|ABBA"]);
+    assert_eq!(titles(root), ["Fjuk|Olmo", "Mic 1|", "P.I.N.G.|Acme", "Paper Boat|Acme"]);
     assert!(!root.join("WOID_DB").join(neuros_core::overrides::EDITS_FILE).exists());
     let _ = Overrides::default();
     let _ = StdVfs::new(root.to_path_buf()).describe();
@@ -159,8 +159,8 @@ fn sync_matches_renamed_and_retagged_files() {
     let root = dev.path();
     std::fs::write(root.join("sn.txt"), "1").unwrap();
     // The Neuros got its files from an older tool with other names.
-    put(&root.join("MUSIC/ABBA/1 - ABBA - SOS.mp3"), &fake_mp3("SOS", "ABBA", "Gold", 2, 50));
-    put(&root.join("MUSIC/ABBA/2 - ABBA - Waterloo.mp3"), &fake_mp3("Waterloo", "ABBA", "Gold", 3, 40));
+    put(&root.join("MUSIC/Acme/1 - Acme - Ping.mp3"), &fake_mp3("Ping", "Acme", "Daybreak", 2, 50));
+    put(&root.join("MUSIC/Acme/2 - Acme - Lighthouse.mp3"), &fake_mp3("Lighthouse", "Acme", "Daybreak", 3, 40));
     // Same size, different audio: must not be paired by size alone.
     let mut other = fake_mp3("Decoy", "X", "Y", 1, 30);
     let n = other.len();
@@ -174,10 +174,10 @@ fn sync_matches_renamed_and_retagged_files() {
             .unwrap();
     neuros_core::write_database(fs.as_ref(), &info, &items, &wopts()).unwrap();
 
-    // PC: same SOS (other name), Waterloo re-tagged (size changes), and a
+    // PC: same Ping (other name), Lighthouse re-tagged (size changes), and a
     // file the same size as other.mp3 but different audio.
-    put(&pc.path().join("ABBA/Gold/02_SOS.mp3"), &fake_mp3("SOS", "ABBA", "Gold", 2, 50));
-    put(&pc.path().join("ABBA/Gold/03_Waterloo.mp3"), &fake_mp3("Waterloo", "ABBA", "Gold", 3, 41));
+    put(&pc.path().join("Acme/Daybreak/02_Ping.mp3"), &fake_mp3("Ping", "Acme", "Daybreak", 2, 50));
+    put(&pc.path().join("Acme/Daybreak/03_Lighthouse.mp3"), &fake_mp3("Lighthouse", "Acme", "Daybreak", 3, 41));
     put(&pc.path().join("X/new.mp3"), &fake_mp3("Other", "X", "Y", 1, 30));
 
     let info = neuros_core::inspect(fs.as_ref(), None);
@@ -186,39 +186,39 @@ fn sync_matches_renamed_and_retagged_files() {
             .unwrap();
     let find = |name: &str| plan.entries.iter().find(|e| e.host.ends_with(name)).unwrap();
     use neuros_core::sync::Match;
-    let sos = find("02_SOS.mp3");
+    let ping = find("02_Ping.mp3");
     assert_eq!(
-        (sos.action, sos.matched, sos.dest.as_str()),
-        (SyncAction::Unchanged, Match::Content, "MUSIC/ABBA/1 - ABBA - SOS.mp3")
+        (ping.action, ping.matched, ping.dest.as_str()),
+        (SyncAction::Unchanged, Match::Content, "MUSIC/Acme/1 - Acme - Ping.mp3")
     );
-    let wat = find("03_Waterloo.mp3");
+    let wat = find("03_Lighthouse.mp3");
     assert_eq!(
         (wat.action, wat.matched, wat.dest.as_str()),
-        (SyncAction::Update, Match::Tags, "MUSIC/ABBA/2 - ABBA - Waterloo.mp3")
+        (SyncAction::Update, Match::Tags, "MUSIC/Acme/2 - Acme - Lighthouse.mp3")
     );
     let new = find("new.mp3");
     assert_eq!((new.action, new.matched), (SyncAction::Copy, Match::None));
     assert_eq!(plan.extra.iter().map(|(p, _)| p.as_str()).collect::<Vec<_>>(), ["MUSIC/X/other.mp3"]);
 
-    // Applying it overwrites Waterloo in place and doesn't duplicate SOS.
+    // Applying it overwrites Lighthouse in place and doesn't duplicate Ping.
     let r = apply_sync(fs.as_ref(), &info, &plan, false, &wopts(), &sopts(), |_, _| {}).unwrap();
     fs.finish().unwrap();
     let mut added = r.added.clone();
     added.sort();
-    assert_eq!(added, ["MUSIC/ABBA/2 - ABBA - Waterloo.mp3", "MUSIC/X/new.mp3"]);
-    assert_eq!(titles(root), ["Decoy|X", "Other|X", "SOS|ABBA", "Waterloo|ABBA"]);
-    assert!(!root.join("MUSIC/ABBA/Gold").exists());
+    assert_eq!(added, ["MUSIC/Acme/2 - Acme - Lighthouse.mp3", "MUSIC/X/new.mp3"]);
+    assert_eq!(titles(root), ["Decoy|X", "Lighthouse|Acme", "Other|X", "Ping|Acme"]);
+    assert!(!root.join("MUSIC/Acme/Daybreak").exists());
 }
 
 #[test]
 fn add_folders_recursively_keeping_structure() {
     use neuros_core::AddLayout;
     let pc = tempfile::tempdir().unwrap();
-    put(&pc.path().join("Beck/Odelay/01 Devils Haircut.mp3"), &fake_mp3("Devils Haircut", "Beck", "Odelay", 1, 5));
-    put(&pc.path().join("Beck/Odelay/cover.jpg"), b"x");
-    put(&pc.path().join("Beck/Mellow Gold/Loser.ogg"), b"not really ogg");
+    put(&pc.path().join("Bravo/Second Steps/01 Dusk Song.mp3"), &fake_mp3("Dusk Song", "Bravo", "Second Steps", 1, 5));
+    put(&pc.path().join("Bravo/Second Steps/cover.jpg"), b"x");
+    put(&pc.path().join("Bravo/First Steps/Dawn.ogg"), b"not really ogg");
     put(&pc.path().join("single.mp3"), &fake_mp3("Single", "S", "S", 1, 5));
-    let sel = [pc.path().join("Beck"), pc.path().join("single.mp3"), pc.path().join("Beck/Odelay")];
+    let sel = [pc.path().join("Bravo"), pc.path().join("single.mp3"), pc.path().join("Bravo/Second Steps")];
     let mut dests: Vec<_> = neuros_core::plan_add(&sel, &AddLayout::KeepFolders("MUSIC".into()), "MUSIC", true)
         .into_iter()
         .map(|p| p.dest)
@@ -226,6 +226,6 @@ fn add_folders_recursively_keeping_structure() {
     dests.sort();
     assert_eq!(
         dests,
-        ["MUSIC/Beck/Mellow Gold/Loser.ogg", "MUSIC/Beck/Odelay/01 Devils Haircut.mp3", "MUSIC/single.mp3"]
+        ["MUSIC/Bravo/First Steps/Dawn.ogg", "MUSIC/Bravo/Second Steps/01 Dusk Song.mp3", "MUSIC/single.mp3"]
     );
 }

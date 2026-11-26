@@ -30,6 +30,8 @@ const ICON_PNG: &[u8] = include_bytes!("../assets/neuros-db.png");
 const APP_ID: &str = "neuros-db";
 
 fn main() -> eframe::Result {
+    #[cfg(target_os = "linux")]
+    ensure_desktop_icon();
     let mut viewport = egui::ViewportBuilder::default()
         .with_app_id(APP_ID)
         .with_title(concat!("Neuros Database Builder ", env!("CARGO_PKG_VERSION")))
@@ -242,28 +244,68 @@ struct App {
     log: Vec<String>,
 }
 
-/// Install a menu entry and icon for this user (Linux). Wayland desktops
-/// take the window icon from the `.desktop` file matching the app ID.
+/// Where per-user desktop files go (`$XDG_DATA_HOME`, else `~/.local/share`).
 #[cfg(target_os = "linux")]
-fn install_desktop_entry() -> std::io::Result<PathBuf> {
-    let data = std::env::var_os("XDG_DATA_HOME")
+fn xdg_data_home() -> std::io::Result<PathBuf> {
+    std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
         .filter(|p| p.is_absolute())
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
-        .ok_or_else(|| std::io::Error::other("HOME is not set"))?;
-    let icon_dir = data.join("icons/hicolor/256x256/apps");
-    std::fs::create_dir_all(&icon_dir)?;
-    std::fs::write(icon_dir.join(format!("{APP_ID}.png")), ICON_PNG)?;
-    let exe = std::env::current_exe()?;
-    let apps = data.join("applications");
-    std::fs::create_dir_all(&apps)?;
-    let path = apps.join(format!("{APP_ID}.desktop"));
+        .ok_or_else(|| std::io::Error::other("HOME is not set"))
+}
+
+/// Write the icon and `neuros-db.desktop` for this user if they are missing
+/// or out of date. Wayland desktops can't take a window icon from the app;
+/// they show the icon of the `.desktop` file named after the app ID. With
+/// `visible` false the entry is hidden from the application menu, unless it
+/// was already added there. Returns the file and whether anything changed.
+#[cfg(target_os = "linux")]
+fn install_desktop_entry(visible: bool) -> std::io::Result<(PathBuf, bool)> {
+    let data = xdg_data_home()?;
+    let mut changed = false;
+    let write = |path: &std::path::Path, bytes: &[u8], changed: &mut bool| -> std::io::Result<()> {
+        if std::fs::read(path).ok().as_deref() != Some(bytes) {
+            if let Some(dir) = path.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
+            std::fs::write(path, bytes)?;
+            *changed = true;
+        }
+        Ok(())
+    };
+    write(&data.join(format!("icons/hicolor/256x256/apps/{APP_ID}.png")), ICON_PNG, &mut changed)?;
+    let path = data.join(format!("applications/{APP_ID}.desktop"));
+    let shown_before = std::fs::read_to_string(&path).is_ok_and(|t| !t.lines().any(|l| l.trim() == "NoDisplay=true"));
+    let hidden = if visible || shown_before { "" } else { "NoDisplay=true\n" };
     let entry = format!(
-        "[Desktop Entry]\nType=Application\nName=Neuros Database Builder\nComment=Build and manage the music database of a Neuros audio player\nExec=\"{}\" %f\nIcon={APP_ID}\nStartupWMClass={APP_ID}\nTerminal=false\nCategories=AudioVideo;Audio;Utility;\n",
-        exe.display()
+        "[Desktop Entry]\nType=Application\nName=Neuros Database Builder\nComment=Build and manage the music database of a Neuros audio player\nExec=\"{}\" %f\nIcon={APP_ID}\nStartupWMClass={APP_ID}\nTerminal=false\nCategories=AudioVideo;Audio;Utility;\n{hidden}",
+        std::env::current_exe()?.display()
     );
-    std::fs::write(&path, entry)?;
-    Ok(path)
+    write(&path, entry.as_bytes(), &mut changed)?;
+    Ok((path, changed))
+}
+
+/// On Linux, make sure the desktop knows the icon before the window opens.
+#[cfg(target_os = "linux")]
+fn ensure_desktop_icon() {
+    if let Ok((_, true)) = install_desktop_entry(false) {
+        // Let KDE pick up the new entry now instead of on its next scan.
+        for tool in ["kbuildsycoca6", "kbuildsycoca5"] {
+            if let Ok(mut child) = std::process::Command::new(tool)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+            {
+                for _ in 0..30 {
+                    if child.try_wait().ok().flatten().is_some() {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+                break;
+            }
+        }
+    }
 }
 
 /// Mounted filesystems that look like a Neuros.
@@ -799,7 +841,7 @@ impl App {
             }
             if ui
                 .add_enabled(can_add && has_db, egui::Button::new("✒ Fix \"?\"…"))
-                .on_hover_text("Old taggers saved apostrophes and dashes as \"?\" (Don?t, 80?85). Repair them in the database.")
+                .on_hover_text("Old taggers saved apostrophes and dashes as \"?\" (Don?t, 1990?1999). Repair them in the database.")
                 .clicked()
             {
                 let changes = neuros_core::textfix::plan(&self.device_tracks);
@@ -1081,11 +1123,11 @@ impl App {
                     ui.strong("Desktop");
                     if ui
                         .button("Add to the application menu")
-                        .on_hover_text("Installs a menu entry and the icon for your user (also shows the icon on Wayland).")
+                        .on_hover_text("Shows Neuros Database Builder in your application menu.")
                         .clicked()
                     {
-                        match install_desktop_entry() {
-                            Ok(p) => self.say(format!("Added menu entry {}", p.display())),
+                        match install_desktop_entry(true) {
+                            Ok((p, _)) => self.say(format!("Added menu entry {}", p.display())),
                             Err(e) => self.say(format!("Could not add the menu entry: {e}")),
                         }
                     }
@@ -1478,7 +1520,7 @@ impl App {
             ui.horizontal(|ui| {
                 ui.add_space(62.0);
                 ui.radio_value(&mut d.kind, AddKind::KeepFolders, "keeping their folders, under:")
-                    .on_hover_text("A picked folder ~/Music/Beck becomes <folder>/Beck/… with its subfolders.");
+                    .on_hover_text("A picked folder ~/Music/Some Band becomes <folder>/Some Band/… with its subfolders.");
                 ui.radio_value(&mut d.kind, AddKind::OneFolder, "all in the folder:");
                 let need_folder = d.kind != AddKind::ByTags;
                 ui.add_enabled(need_folder, egui::TextEdit::singleline(&mut d.folder).desired_width(200.0));
@@ -2668,10 +2710,10 @@ mod tests {
     #[test]
     fn sorting() {
         let rows = vec![
-            (0, false, t("Zed", Some("beck"), "Odelay", 2, 200, "C:/m/10.mp3")),
+            (0, false, t("Zed", Some("bravo"), "Second", 2, 200, "C:/m/10.mp3")),
             (1, true, t("alpha", None, "X", 1, 100, "C:/m/2.mp3")),
-            (2, false, t("Mid", Some("Air"), "Moon", 1, 300, "C:/m/1.mp3")),
-            (3, false, t("Devils", Some("Beck"), "Odelay", 1, 50, "C:/m/3.mp3")),
+            (2, false, t("Mid", Some("Able"), "First", 1, 300, "C:/m/1.mp3")),
+            (3, false, t("Dusk", Some("Bravo"), "Second", 1, 50, "C:/m/3.mp3")),
         ];
         assert_eq!(sorted_rows(rows.clone(), (SortCol::Title, false)), [1, 3, 2, 0]);
         assert_eq!(sorted_rows(rows.clone(), (SortCol::Title, true)), [0, 2, 3, 1]);

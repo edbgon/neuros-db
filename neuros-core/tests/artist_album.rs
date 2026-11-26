@@ -47,13 +47,13 @@ fn aa_map(db: &Database) -> Vec<(String, Vec<String>)> {
 #[test]
 fn artist_album_grouping() {
     let tracks = vec![
-        t("a1", Some("Air"), Some("Moon Safari")),
-        t("a2", Some("Air"), Some("Talkie Walkie")),
-        t("b1", Some("The Beatles"), Some("Abbey Road")),
-        t("c1", Some("Air"), Some("Hits Mix")),
-        t("c2", Some("Beck"), Some("Hits Mix")), // two artists → compilation
-        t("d1", None, Some("Mystery")),          // no artist → not listed
-        t("e1", Some("Various Artists"), Some("Now 1")),
+        t("a1", Some("Alpha"), Some("Morning")),
+        t("a2", Some("Alpha"), Some("Twilight")),
+        t("b1", Some("The Bravos"), Some("Avenue")),
+        t("c1", Some("Alpha"), Some("Hits Mix")),
+        t("c2", Some("Bravo"), Some("Hits Mix")), // two artists → compilation
+        t("d1", None, Some("Mystery")),           // no artist → not listed
+        t("e1", Some("Various Artists"), Some("Party 1")),
     ];
     let files = build_audio(&tracks, &BuildOptions { artist_albums: true, ..Default::default() }).unwrap();
     let db = load_database_from_files(&files, "audio").unwrap();
@@ -61,9 +61,9 @@ fn artist_album_grouping() {
     assert_eq!(
         aa_map(&db),
         vec![
-            ("Various Artists".to_string(), vec!["Hits Mix".to_string(), "Now 1".to_string()]),
-            ("Air".to_string(), vec!["Moon Safari".to_string(), "Talkie Walkie".to_string()]),
-            ("The Beatles".to_string(), vec!["Abbey Road".to_string()]),
+            ("Various Artists".to_string(), vec!["Hits Mix".to_string(), "Party 1".to_string()]),
+            ("Alpha".to_string(), vec!["Morning".to_string(), "Twilight".to_string()]),
+            ("The Bravos".to_string(), vec!["Avenue".to_string()]),
         ]
     );
     // Albums header carries the "Artists" sub-rule; audio header is the NeurosDBM one.

@@ -45,45 +45,49 @@ fn finds_and_removes_duplicates() {
     let dev = tempfile::tempdir().unwrap();
     let root = dev.path();
     std::fs::write(root.join("sn.txt"), "1").unwrap();
-    let br = |t| Some((t, "Bad Religion", "80-85"));
+    let br = |t| Some((t, "Some Band", "Early"));
     // The same file twice.
-    put(root, "MUSIC/DATABAS/Misc/BOB Remix.mp3", &mp3(Some(("BOB Remix", "DATABAS", "Misc")), 40, 1));
-    put(root, "MUSIC/DATABAS [NEW]/BOB remix.mp3", &mp3(Some(("BOB Remix", "DATABAS", "Misc")), 40, 1));
+    put(root, "MUSIC/Synth Co/Misc/Robot Remix.mp3", &mp3(Some(("Robot Remix", "Synth Co", "Misc")), 40, 1));
+    put(root, "MUSIC/Synth Co [NEW]/Robot remix.mp3", &mp3(Some(("Robot Remix", "Synth Co", "Misc")), 40, 1));
     // Two rips of one album (different bytes), with a song that is on the
     // album twice (tracks 15 and 26) — those two are not copies.
-    put(root, "MUSIC/Bad Religion/8085/10._American_Dream.mp3", &mp3(br("American Dream"), 50, 2));
-    put(root, "MUSIC/Bad Religion/80-85 - 1990/10._American_Dream.mp3", &mp3(br("American Dream"), 51, 3));
-    put(root, "MUSIC/Bad Religion/8085/15._Bad_Religion.mp3", &mp3(br("Bad Religion"), 60, 4));
-    put(root, "MUSIC/Bad Religion/8085/26._Bad_Religion.mp3", &mp3(br("Bad Religion"), 61, 5));
-    put(root, "MUSIC/Bad Religion/80-85 - 1990/15._Bad_Religion.mp3", &mp3(br("Bad Religion"), 62, 6));
-    put(root, "MUSIC/Bad Religion/80-85 - 1990/26._Bad_Religion.mp3", &mp3(br("Bad Religion"), 63, 7));
+    put(root, "MUSIC/Some Band/Early/10._Night_Drive.mp3", &mp3(br("Night Drive"), 50, 2));
+    put(root, "MUSIC/Some Band/Early - 1990/10._Night_Drive.mp3", &mp3(br("Night Drive"), 51, 3));
+    put(root, "MUSIC/Some Band/Early/15._Some_Band.mp3", &mp3(br("Some Band"), 60, 4));
+    put(root, "MUSIC/Some Band/Early/26._Some_Band.mp3", &mp3(br("Some Band"), 61, 5));
+    put(root, "MUSIC/Some Band/Early - 1990/15._Some_Band.mp3", &mp3(br("Some Band"), 62, 6));
+    put(root, "MUSIC/Some Band/Early - 1990/26._Some_Band.mp3", &mp3(br("Some Band"), 63, 7));
     // A live version is a different song.
     put(
         root,
-        "MUSIC/Bad Religion/Gray Race/15._Cease.mp3",
-        &mp3(Some(("Cease", "Bad Religion", "The Gray Race")), 50, 8),
+        "MUSIC/Some Band/Grey Skies/15._Rainy Day.mp3",
+        &mp3(Some(("Rainy Day", "Some Band", "Grey Skies")), 50, 8),
     );
     put(
         root,
-        "MUSIC/Bad Religion/Epic/20._Cease_(live).mp3",
-        &mp3(Some(("Cease (live)", "Bad Religion", "Epic Years")), 50, 9),
+        "MUSIC/Some Band/Live/20._Rainy Day_(live).mp3",
+        &mp3(Some(("Rainy Day (live)", "Some Band", "Live Years")), 50, 9),
     );
     // An untagged older copy next to a tagged one.
     put(
         root,
-        "MUSIC/Against Me!/As the Eternal Cowboy/1._TSR.mp3",
-        &mp3(Some(("T.S.R. (This Shit Rules)", "Against Me!", "As the Eternal Cowboy")), 45, 10),
+        "MUSIC/The Testers!/Picnic Basket/1._BLT.mp3",
+        &mp3(Some(("B.L.T. (Bacon Lettuce Tomato)", "The Testers!", "Picnic Basket")), 45, 10),
     );
-    put(root, "MUSIC/Against Me!/As the Eternal Cowboy - 2003/1 - Against Me! - T.S.R..mp3", &mp3(None, 44, 11));
+    put(root, "MUSIC/The Testers!/Picnic Basket - 2003/1 - The Testers! - B.L.T..mp3", &mp3(None, 44, 11));
     // Same song on a best-of.
-    put(root, "MUSIC/Pixies/Doolittle/5._Debaser.mp3", &mp3(Some(("Debaser", "Pixies", "Doolittle")), 50, 12));
     put(
         root,
-        "MUSIC/Pixies/Death to the Pixies/1._Debaser.mp3",
-        &mp3(Some(("Debaser", "Pixies", "Death to the Pixies")), 50, 13),
+        "MUSIC/The Examples/Second Album/5._Hello There.mp3",
+        &mp3(Some(("Hello There", "The Examples", "Second Album")), 50, 12),
+    );
+    put(
+        root,
+        "MUSIC/The Examples/Best of the Examples/1._Hello There.mp3",
+        &mp3(Some(("Hello There", "The Examples", "Best of the Examples")), 50, 13),
     );
     // A recording is never a duplicate.
-    put(root, "WOID_RECORD/BOB Remix.mp3", &mp3(Some(("BOB Remix", "DATABAS", "Misc")), 40, 1));
+    put(root, "WOID_RECORD/Robot Remix.mp3", &mp3(Some(("Robot Remix", "Synth Co", "Misc")), 40, 1));
 
     let (fs, _) = Source::Mounted(root.to_path_buf()).open(true).unwrap();
     let info = neuros_core::inspect(fs.as_ref(), None);
@@ -108,21 +112,21 @@ fn finds_and_removes_duplicates() {
     };
     assert_eq!(got.len(), 5, "{got:#?}");
     assert!(
-        has("DATABAS/Misc/BOB Remix.mp3", "DATABAS [NEW]/BOB remix.mp3", Relation::Identical)
-            || has("DATABAS [NEW]/BOB remix.mp3", "DATABAS/Misc/BOB Remix.mp3", Relation::Identical),
+        has("Synth Co/Misc/Robot Remix.mp3", "Synth Co [NEW]/Robot remix.mp3", Relation::Identical)
+            || has("Synth Co [NEW]/Robot remix.mp3", "Synth Co/Misc/Robot Remix.mp3", Relation::Identical),
         "{got:#?}"
     );
     let pair = |a: &str, b: &str| has(a, b, Relation::SameAlbum) || has(b, a, Relation::SameAlbum);
-    assert!(pair("8085/10._American_Dream.mp3", "80-85 - 1990/10._American_Dream.mp3"), "{got:#?}");
-    assert!(pair("8085/15._Bad_Religion.mp3", "80-85 - 1990/15._Bad_Religion.mp3"), "{got:#?}");
-    assert!(pair("8085/26._Bad_Religion.mp3", "80-85 - 1990/26._Bad_Religion.mp3"), "{got:#?}");
+    assert!(pair("Early/10._Night_Drive.mp3", "Early - 1990/10._Night_Drive.mp3"), "{got:#?}");
+    assert!(pair("Early/15._Some_Band.mp3", "Early - 1990/15._Some_Band.mp3"), "{got:#?}");
+    assert!(pair("Early/26._Some_Band.mp3", "Early - 1990/26._Some_Band.mp3"), "{got:#?}");
     // The tagged copy is kept over the untagged one.
-    assert!(has("As the Eternal Cowboy/1._TSR.mp3", "1 - Against Me! - T.S.R..mp3", Relation::SameAlbum), "{got:#?}");
+    assert!(has("Picnic Basket/1._BLT.mp3", "1 - The Testers! - B.L.T..mp3", Relation::SameAlbum), "{got:#?}");
 
     // The best-of copy only shows up when asked for.
     let all = show(&find_duplicates(fs.as_ref(), &info, true, &AtomicBool::new(false), |_, _| {}).unwrap());
     assert_eq!(all.len(), 6);
-    assert!(all.iter().any(|g| g.iter().any(|(p, r)| p.ends_with("Debaser.mp3") && *r == Relation::OtherAlbum)));
+    assert!(all.iter().any(|g| g.iter().any(|(p, r)| p.ends_with("Hello There.mp3") && *r == Relation::OtherAlbum)));
 
     // Delete the suggested extras.
     let doomed: Vec<String> =
@@ -136,13 +140,13 @@ fn finds_and_removes_duplicates() {
         assert!(!root.join(p).exists(), "{p}");
     }
     assert!(
-        !root.join("MUSIC/DATABAS [NEW]").exists() || !root.join("MUSIC/DATABAS/Misc").exists(),
+        !root.join("MUSIC/Synth Co [NEW]").exists() || !root.join("MUSIC/Synth Co/Misc").exists(),
         "emptied folder removed"
     );
     let db = load_database(&StdVfs::new(root.to_path_buf()), "WOID_DB/audio", "audio").unwrap();
     assert_eq!(neuros_core::verify::verify(&db), Vec::<String>::new());
     assert_eq!(db.tracks().len(), 10);
-    assert!(root.join("WOID_RECORD/BOB Remix.mp3").exists());
+    assert!(root.join("WOID_RECORD/Robot Remix.mp3").exists());
 }
 
 #[test]
@@ -152,21 +156,25 @@ fn sync_does_not_bring_back_removed_duplicates() {
     let pc = tempfile::tempdir().unwrap();
     let root = dev.path();
     std::fs::write(root.join("sn.txt"), "1").unwrap();
-    let br = |t| Some((t, "Bad Religion", "80-85"));
+    let br = |t| Some((t, "Some Band", "Early"));
     // The PC has the album twice (two rips) plus one more album.
-    for (dir, salt) in [("80-85 - 1990", 2u8), ("How Could Hell 80-85 - 1990", 3)] {
+    for (dir, salt) in [("Early - 1990", 2u8), ("Early Years Remaster - 1990", 3)] {
         put(
             pc.path(),
-            &format!("Bad Religion/{dir}/10._American_Dream.mp3"),
-            &mp3(br("American Dream"), 50 + salt as usize, salt),
+            &format!("Some Band/{dir}/10._Night_Drive.mp3"),
+            &mp3(br("Night Drive"), 50 + salt as usize, salt),
         );
         put(
             pc.path(),
-            &format!("Bad Religion/{dir}/11._Eat_Your_Dog.mp3"),
-            &mp3(br("Eat Your Dog"), 40 + salt as usize, salt),
+            &format!("Some Band/{dir}/11._Cold_Coffee.mp3"),
+            &mp3(br("Cold Coffee"), 40 + salt as usize, salt),
         );
     }
-    put(pc.path(), "Pixies/Doolittle/5._Debaser.mp3", &mp3(Some(("Debaser", "Pixies", "Doolittle")), 50, 9));
+    put(
+        pc.path(),
+        "The Examples/Second Album/5._Hello There.mp3",
+        &mp3(Some(("Hello There", "The Examples", "Second Album")), 50, 9),
+    );
     let sopts = ScanOptions { music_dir: String::new(), include_recordings: true, placeholders: true };
     let plan_and_sync = |skip: bool| {
         let (fs, _) = Source::Mounted(root.to_path_buf()).open(true).unwrap();
@@ -189,7 +197,7 @@ fn sync_does_not_bring_back_removed_duplicates() {
             .dup_of
             .as_deref()
             .unwrap()
-            .contains("/80-85 - 1990/"))
+            .contains("/Early - 1990/"))
     );
 
     // Without skipping, the second rip arrives; the deduper finds it, and

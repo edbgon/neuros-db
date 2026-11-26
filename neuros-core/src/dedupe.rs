@@ -456,22 +456,22 @@ mod tests {
     #[test]
     fn keys() {
         let k = |title, artist, path| song_key(&t(title, artist), path);
-        let want = Some(("againstme".to_string(), "tsr".to_string()));
-        assert_eq!(k("T.S.R. (This Shit Rules)", Some("Against Me!"), "x"), want);
+        let want = Some(("thetesters".to_string(), "blt".to_string()));
+        assert_eq!(k("B.L.T. (Bacon Lettuce Tomato)", Some("The Testers!"), "x"), want);
         assert_eq!(
             k(
-                "1 - Against Me! - T.S.R.",
+                "1 - The Testers! - B.L.T.",
                 Some("Unknown Artist"),
-                "music/Against Me!/Cowboy/1 - Against Me! - T.S.R..mp3"
+                "music/The Testers!/Picnic/1 - The Testers! - B.L.T..mp3"
             ),
             want
         );
-        assert_eq!(k("01_T.S.R.", None, "music/Against Me!/Cowboy/01_T.S.R..mp3"), want);
-        assert_eq!(k("Speak To Me - The Flaming Lips", None, "music/The Flaming Lips/x.mp3").unwrap().1, "speaktome");
-        assert_eq!(k("1979", Some("Smashing Pumpkins"), "x").unwrap().1, "1979");
+        assert_eq!(k("01_B.L.T.", None, "music/The Testers!/Picnic/01_B.L.T..mp3"), want);
+        assert_eq!(k("Hello There - The Examples", None, "music/The Examples/x.mp3").unwrap().1, "hellothere");
+        assert_eq!(k("1984", Some("Some Band"), "x").unwrap().1, "1984");
         assert_eq!(k("song", None, "song.mp3"), None);
-        assert_ne!(k("Cease (live)", Some("BR"), "x"), k("Cease", Some("BR"), "x"));
-        assert_eq!(k("Cease (Remastered 2004)", Some("BR"), "x"), k("Cease", Some("BR"), "x"));
-        assert_eq!(norm("No One Knows (UNKLE remix)"), "nooneknowsunkleremix");
+        assert_ne!(k("Rainy Day (live)", Some("SB"), "x"), k("Rainy Day", Some("SB"), "x"));
+        assert_eq!(k("Rainy Day (Remastered 2004)", Some("SB"), "x"), k("Rainy Day", Some("SB"), "x"));
+        assert_eq!(norm("Rainy Day (Club remix)"), "rainydayclubremix");
     }
 }

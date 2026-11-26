@@ -13,8 +13,7 @@ Linux, Windows and macOS builds are on the
 [Releases](https://github.com/edbgon/neuros-db/releases) page. Run
 `neuros-gui`, or `neuros-db` for the command line.
 
-On Linux, *Options → Add to the application menu* installs a menu entry and
-the icon.
+On Linux, *Options → Add to the application menu* adds it to your menu.
 
 ## Features
 

@@ -35,8 +35,8 @@ fn repairs_existing_database_and_new_scans() {
     let root = dev.path();
     std::fs::write(root.join("sn.txt"), "1").unwrap();
     std::fs::create_dir_all(root.join("MUSIC")).unwrap();
-    std::fs::write(root.join("MUSIC/a.mp3"), mp3("Don?t Cry", "Man or Astro?Man?", "80?85")).unwrap();
-    std::fs::write(root.join("MUSIC/b.mp3"), mp3("Where Is My Mind?", "Pixies", "Surfer Rosa")).unwrap();
+    std::fs::write(root.join("MUSIC/a.mp3"), mp3("Don?t Wait Up", "Band of Robo?Men?", "1990?1999")).unwrap();
+    std::fs::write(root.join("MUSIC/b.mp3"), mp3("Where Are My Keys?", "The Examples", "Lowland")).unwrap();
 
     // A database written by an older tool, with the "?" in it.
     let (fs, _) = Source::Mounted(root.to_path_buf()).open(true).unwrap();
@@ -48,13 +48,13 @@ fn repairs_existing_database_and_new_scans() {
     // New scans already repair tags...
     let mut titles: Vec<_> = items.iter().map(|i| i.track.title.clone()).collect();
     titles.sort();
-    assert_eq!(titles, ["Don't Cry", "Where Is My Mind?"]);
+    assert_eq!(titles, ["Don't Wait Up", "Where Are My Keys?"]);
     // ...so put the broken text back to imitate the old database.
     for it in &mut items {
-        if it.track.title == "Don't Cry" {
-            it.track.title = "Don?t Cry".into();
-            it.track.artist = Some("Man or Astro?Man?".into());
-            it.track.album = Some("80?85".into());
+        if it.track.title == "Don't Wait Up" {
+            it.track.title = "Don?t Wait Up".into();
+            it.track.artist = Some("Band of Robo?Men?".into());
+            it.track.album = Some("1990?1999".into());
         }
     }
     neuros_core::write_database(fs.as_ref(), &info, &items, &wopts(false)).unwrap();
@@ -63,7 +63,7 @@ fn repairs_existing_database_and_new_scans() {
     let (changes, _) = neuros_core::textfix::fix_database(fs.as_ref(), &info, &wopts(true)).unwrap();
     assert_eq!(changes.len(), 3);
     let db = load_database(&StdVfs::new(root.to_path_buf()), "WOID_DB/audio", "audio").unwrap();
-    assert!(db.tracks().iter().any(|t| t.title == "Don?t Cry"), "dry run wrote nothing");
+    assert!(db.tracks().iter().any(|t| t.title == "Don?t Wait Up"), "dry run wrote nothing");
 
     let (changes, r) = neuros_core::textfix::fix_database(fs.as_ref(), &info, &wopts(false)).unwrap();
     fs.finish().unwrap();
@@ -74,7 +74,7 @@ fn repairs_existing_database_and_new_scans() {
     let mut got: Vec<String> =
         db.tracks().iter().map(|t| format!("{}|{}|{}", t.title, t.keys[1].join(","), t.keys[2].join(","))).collect();
     got.sort();
-    assert_eq!(got, ["Don't Cry|Man or Astro-Man?|80-85", "Where Is My Mind?|Pixies|Surfer Rosa"]);
+    assert_eq!(got, ["Don't Wait Up|Band of Robo-Men?|1990-1999", "Where Are My Keys?|The Examples|Lowland"]);
     // Nothing left to fix.
     let (fs, _) = Source::Mounted(root.to_path_buf()).open(true).unwrap();
     let info = neuros_core::inspect(fs.as_ref(), None);

@@ -1,5 +1,5 @@
 //! Repair "?" left in tags by taggers that saved text as Latin-1, which has
-//! no curly quotes or dashes: "Don’t" → "Don?t", "80–85" → "80?85".
+//! no curly quotes or dashes: "Don’t" → "Don?t", "1990–1999" → "1990?1999".
 //!
 //! Only patterns that are clear from context are fixed; a "?" that may be
 //! a real question mark, or stands for text that can't be guessed (an
@@ -40,7 +40,7 @@ pub fn repair(s: &str) -> String {
     // script or real "??" punctuation: leave them.
     let in_run = |i: usize| at(i as isize - 1) == Some('?') || at(i as isize + 1) == Some('?');
 
-    // Quote pairs: "?Hurricane?", "Complete ?B? Sides", "?God Deciding?".
+    // Quote pairs: "?Banana?", "Rare ?B? Tracks", "?Quiet Please?".
     let opens = |i: usize| {
         let p = at(i as isize - 1);
         (p.is_none() || p == Some(' ') || p == Some('(')) && is_word_char(at(i as isize + 1))
@@ -79,9 +79,9 @@ pub fn repair(s: &str) -> String {
         let prev_word = word_before(&chars, i);
         let lower_next = next_word.to_ascii_lowercase();
         let r: Option<&'static str> = match (p, nx) {
-            // 80?85, 1974?1978
+            // 70?79, 1981?1989
             (Some(a), Some(b)) if a.is_ascii_digit() && b.is_ascii_digit() => Some("-"),
-            // I?D?I?O?T → I-D-I-O-T (spelled out)
+            // T?E?S?T → T-E-S-T (spelled out)
             (Some(a), Some(b))
                 if prev_word.len() == 1 && next_word.len() == 1 && a.is_ascii_uppercase() && b.is_ascii_uppercase() =>
             {
@@ -91,13 +91,13 @@ pub fn repair(s: &str) -> String {
             (Some('c' | 'C'), Some('u')) if next_word == "ur" && prev_word.len() == 1 => Some("oe"),
             // Don?t, It?s, Shouldn?t?ve, 3?s
             (Some(a), Some(_)) if a.is_ascii_alphanumeric() && CONTRACTIONS.contains(&lower_next.as_str()) => Some("'"),
-            // Rank?n?File, Rock ?n? Roll (the opening one)
+            // Pick?n?Mix, Rock ?n? Roll (the opening one)
             (_, Some('n' | 'N')) if next_word.len() == 1 && at(i as isize + 2) == Some('?') => Some("'"),
-            // Rank?n?File, Spit n? Drool (the closing one)
+            // Pick?n?Mix, Fish n? Chips (the closing one)
             (Some('n' | 'N'), _) if prev_word.len() == 1 => Some("'"),
-            // Bag o? Miracles, Ol? Dirty
+            // Cup o? Tea, Ol? Rusty
             (Some(_), Some(' ')) if matches!(prev_word.to_ascii_lowercase().as_str(), "o" | "ol") => Some("'"),
-            // d?ici, L?Via, O?Brother, s?ouvre
+            // d?ami, L?Etoile, O?Malley, s?endort
             (Some(a), Some(b))
                 if prev_word.len() == 1
                     && b.is_ascii_alphabetic()
@@ -106,9 +106,9 @@ pub fn repair(s: &str) -> String {
             {
                 Some("'")
             }
-            // Heart?Shaped, Astro?Man, La?Z?Boy, U?Mass, Five?O
+            // Star?Shaped, Robo?Men, Go?K?Art, X?Ray, Nine?O
             (Some(a), Some(b)) if a.is_ascii_alphanumeric() && b.is_ascii_uppercase() => Some("-"),
-            // Bringin? It, Comin? Down, Fuckin? (at the end too)
+            // Walkin? Home, Movin? On, Groovin? (at the end too)
             (Some('n'), None | Some(' ' | ')' | ',')) if prev_word.len() >= 4 && prev_word.ends_with("in") => Some("'"),
             // ?em, ?Cept, ?Pon, ?Til, ?78
             (None | Some(' ' | '('), Some(b))
@@ -117,7 +117,7 @@ pub fn repair(s: &str) -> String {
             {
                 Some("'")
             }
-            // The Hives ? Declare Guerre, Singles ? Going Steady
+            // Live ? at Home, Singles ? Volume Two
             (Some(' '), Some(' ')) => Some("-"),
             _ => None,
         };
@@ -145,52 +145,49 @@ mod tests {
     #[test]
     fn fixes() {
         for (a, b) in [
-            ("Don?t Cry", "Don't Cry"),
-            ("I Can?t Give You What I Haven?t Got", "I Can't Give You What I Haven't Got"),
-            (
-                "Ever Fallen in Love (With Someone You Shouldn?t?ve)",
-                "Ever Fallen in Love (With Someone You Shouldn't've)",
-            ),
-            ("3?s & 7?s", "3's & 7's"),
-            ("We?re Only Gonna Die", "We're Only Gonna Die"),
-            ("Who?ll Be the Next in Line", "Who'll Be the Next in Line"),
-            ("80?85", "80-85"),
-            ("The Essential Radio Birdman (1974?1978)", "The Essential Radio Birdman (1974-1978)"),
-            ("Heart?Shaped Box", "Heart-Shaped Box"),
-            ("Man or Astro?Man?", "Man or Astro-Man?"),
-            ("The La?Z?Boy 500", "The La-Z-Boy 500"),
-            ("U?Mass", "U-Mass"),
-            ("Five?O Ford", "Five-O Ford"),
-            ("Bringin? It All Back Home", "Bringin' It All Back Home"),
-            ("Cruisin? for a Bruisin?", "Cruisin' for a Bruisin'"),
-            ("Stay Off the Fuckin? Flowers", "Stay Off the Fuckin' Flowers"),
-            ("Long Before Rock ?n? Roll", "Long Before Rock 'n' Roll"),
-            ("Rank?n?File", "Rank'n'File"),
-            ("Hail Hail Spit n? Drool", "Hail Hail Spit n' Drool"),
-            ("Kill Rock ?n Roll", "Kill Rock 'n Roll"),
-            ("Smoke ?em if You Got ?em", "Smoke 'em if You Got 'em"),
-            ("Anything ?Cept the Truth", "Anything 'Cept the Truth"),
-            ("Natty Dreadlocks ?Pon the Mountain Top", "Natty Dreadlocks 'Pon the Mountain Top"),
-            ("Burn My Eye ?78", "Burn My Eye '78"),
-            ("Bag o? Miracles", "Bag o' Miracles"),
-            ("Blakroc feat. Ludacris & Ol? Dirty Bastard", "Blakroc feat. Ludacris & Ol' Dirty Bastard"),
-            ("O?Brother", "O'Brother"),
-            ("Duel at the Two O?Clock Bell", "Duel at the Two O'Clock Bell"),
-            ("La Femme d?argent", "La Femme d'argent"),
-            ("L?Via L?Viaquez", "L'Via L'Viaquez"),
-            ("I Belong to You / Mon c?ur s?ouvre a ta voix", "I Belong to You / Mon coeur s'ouvre a ta voix"),
-            ("C?ur de pirate", "Coeur de pirate"),
-            ("Complete ?B? Sides", "Complete 'B' Sides"),
-            ("The Word ?Hurricane?", "The Word 'Hurricane'"),
-            ("?God Deciding?", "'God Deciding'"),
-            ("There?s No ?i? In Team", "There's No 'i' In Team"),
-            ("Echoes on ?A?. Street", "Echoes on 'A'. Street"),
-            ("?D? for Dangerous", "'D' for Dangerous"),
-            ("The Hives ? Declare Guerre Nucleaire", "The Hives - Declare Guerre Nucleaire"),
-            ("Singles ? Going Steady", "Singles - Going Steady"),
-            ("Moses? I Amn?t", "Moses? I Amn't"),
-            ("a.k.a. I?D?I?O?T", "a.k.a. I-D-I-O-T"),
-            ("I?m Not You", "I'm Not You"),
+            ("Don?t Wait for the Bus", "Don't Wait for the Bus"),
+            ("I Can?t Find What I Haven?t Lost", "I Can't Find What I Haven't Lost"),
+            ("You Shouldn?t?ve Called (Again)", "You Shouldn't've Called (Again)"),
+            ("4?s & 9?s", "4's & 9's"),
+            ("We?re Late Again", "We're Late Again"),
+            ("Who?ll Feed the Cat", "Who'll Feed the Cat"),
+            ("70?79", "70-79"),
+            ("The Collected Tests (1981?1989)", "The Collected Tests (1981-1989)"),
+            ("Star?Shaped Lamp", "Star-Shaped Lamp"),
+            ("Band of Robo?Men?", "Band of Robo-Men?"),
+            ("The Go?K?Art Race", "The Go-K-Art Race"),
+            ("X?Ray Eyes", "X-Ray Eyes"),
+            ("Nine?O Diner", "Nine-O Diner"),
+            ("Walkin? Home Slow", "Walkin' Home Slow"),
+            ("Movin? and Groovin?", "Movin' and Groovin'"),
+            ("Stop the Darnin? Noise", "Stop the Darnin' Noise"),
+            ("Long Before Rock ?n? Roll Day", "Long Before Rock 'n' Roll Day"),
+            ("Pick?n?Mix", "Pick'n'Mix"),
+            ("Fish n? Chips Night", "Fish n' Chips Night"),
+            ("Test Rock ?n Roll", "Test Rock 'n Roll"),
+            ("Wake ?em Up, Shake ?em Down", "Wake 'em Up, Shake 'em Down"),
+            ("Anything ?Cept Monday", "Anything 'Cept Monday"),
+            ("Stay ?Pon the Hill", "Stay 'Pon the Hill"),
+            ("Back in ?82", "Back in '82"),
+            ("Cup o? Tea", "Cup o' Tea"),
+            ("Ol? Rusty Truck", "Ol' Rusty Truck"),
+            ("O?Malley", "O'Malley"),
+            ("Five O?Clock Train", "Five O'Clock Train"),
+            ("La Maison d?ami", "La Maison d'ami"),
+            ("L?Etoile L?Ombre", "L'Etoile L'Ombre"),
+            ("Un Jour / Un c?ur s?endort", "Un Jour / Un coeur s'endort"),
+            ("C?ur en carton", "Coeur en carton"),
+            ("Rare ?B? Tracks", "Rare 'B' Tracks"),
+            ("The Word ?Banana?", "The Word 'Banana'"),
+            ("?Quiet Please?", "'Quiet Please'"),
+            ("There?s No ?x? In Test", "There's No 'x' In Test"),
+            ("Meet on ?C?. Street", "Meet on 'C'. Street"),
+            ("?K? for Kettle", "'K' for Kettle"),
+            ("The Examples ? Live at Home", "The Examples - Live at Home"),
+            ("Singles ? Volume Two", "Singles - Volume Two"),
+            ("Really? I Amn?t", "Really? I Amn't"),
+            ("a.k.a. T?E?S?T", "a.k.a. T-E-S-T"),
+            ("I?m Not a Robot", "I'm Not a Robot"),
         ] {
             assert_eq!(repair(a), b, "{a}");
         }
@@ -199,24 +196,24 @@ mod tests {
     #[test]
     fn leaves_real_question_marks_and_unknowns() {
         for s in [
-            "Where Is My Mind?",
+            "Where Are My Keys?",
             "WTF?",
-            "Are You a Hypnotist??",
-            "Do You Realize??",
-            "What Is Rock!?",
-            "Man? or Astro-man?",
-            "What?s That Spell?? Go to Hell!",
+            "Are You a Robot??",
+            "Do You See It??",
+            "What Is Jazz!?",
+            "Robo? or Robo-Man?",
+            "What?s That Noise?? Go Home!",
             "1996 ???????????",
             "???",
-            "Dr?im ti miesto",
-            "Fuck Armageddon? This is Hell",
-            "Suddenly? (I Miss Carpaty)",
-            "Borders Are?",
+            "Vr?ta mesto",
+            "Forget It? This is Fine",
+            "Suddenly? (I Miss Lunch)",
+            "Lunch Is?",
             "Theme From?",
-            "Den som spar ?",
-            "Sometimes It Feels Like...!?%?*",
-            "Should I Stay or Should I Go?",
-            "Do They Know it's Christmas? (live 1993)",
+            "Hej och ?",
+            "It Feels Like...!?%?*",
+            "Should I Test or Should I Go?",
+            "Do They Know it's Tuesday? (live 1993)",
         ] {
             let want = s.replace("What?s", "What's");
             assert_eq!(repair(s), want, "{s}");

@@ -467,7 +467,7 @@ pub enum AddLayout {
     /// All into one device-relative folder.
     Folder(String),
     /// Under a device-relative folder, keeping the folders that were
-    /// picked: adding `~/Music/Beck` gives `<folder>/Beck/<album>/<file>`.
+    /// picked: adding `~/Music/Some Band` gives `<folder>/Some Band/<album>/<file>`.
     KeepFolders(String),
 }
 

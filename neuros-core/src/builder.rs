@@ -15,7 +15,7 @@ pub const AUDIO_CHILDREN: [&str; 5] = ["playlist", "artist", "albums", "genre", 
 
 #[derive(Debug, Clone)]
 pub struct BuildOptions {
-    /// Sort "The Beatles" under B.
+    /// Sort "The Examples" under E.
     pub ignore_leading_the: bool,
     /// Write the firmware >= 2.14 Artist/Album sub-database
     /// (`artistalbum.*`, Albums → Artists menu) using NeurosDBM's layout.

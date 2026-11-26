@@ -282,7 +282,7 @@ mod tests {
 
     #[test]
     fn sanitizing() {
-        assert_eq!(sanitize_text("Björk  –  Jóga"), "Bjork - Joga");
+        assert_eq!(sanitize_text("Café  –  Señor"), "Cafe - Senor");
         assert_eq!(sanitize_filename("AC/DC: Live?"), "AC_DC_ Live_");
         assert_eq!(device_path(Drive::C, "MUSIC/a b/c.mp3"), "C:/MUSIC/a b/c.mp3");
         assert_eq!(normalize_rel("/MUSIC\\x/./"), "MUSIC/x");

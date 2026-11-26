@@ -71,7 +71,7 @@ enum Cmd {
         /// Backup directory.
         #[arg(long)]
         backup_dir: Option<PathBuf>,
-        /// Sort "The Beatles" under T instead of B.
+        /// Sort "The Examples" under T instead of E.
         #[arg(long)]
         keep_the: bool,
         /// Write even if the target doesn't look like a Neuros.
@@ -111,7 +111,7 @@ enum Cmd {
         no_backup: bool,
     },
     /// Repair "?" that old taggers left for apostrophes and dashes
-    /// ("Don?t" → "Don't", "80?85" → "80-85") in the device's database.
+    /// ("Don?t" → "Don't", "1990?1999" → "1990-1999") in the device's database.
     FixText {
         #[command(flatten)]
         target: Target,

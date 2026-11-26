@@ -80,9 +80,9 @@ fn make_image(path: &Path) -> Vec<(String, Vec<u8>)> {
     let fs = Box::new(FatVfs::mount(part, "test".into()).unwrap());
 
     let files = vec![
-        ("MUSIC/ABBA/Gold/01 Dancing Queen.mp3".to_string(), fake_mp3("Dancing Queen", "ABBA", "Gold", 1, 300)),
-        ("MUSIC/ABBA/Gold/02 SOS.mp3".to_string(), fake_mp3("SOS", "ABBA", "Gold", 2, 200)),
-        ("MUSIC/Björk/Jóga.mp3".to_string(), fake_mp3("Joga", "Bjork", "Homogenic", 3, 150)),
+        ("MUSIC/Acme/Daybreak/01 Paper Boat.mp3".to_string(), fake_mp3("Paper Boat", "Acme", "Daybreak", 1, 300)),
+        ("MUSIC/Acme/Daybreak/02 Ping.mp3".to_string(), fake_mp3("Ping", "Acme", "Daybreak", 2, 200)),
+        ("MUSIC/Ölmo/Fjúk.mp3".to_string(), fake_mp3("Fjuk", "Olmo", "Lowland", 3, 150)),
     ];
     fs.write_file("sn.txt", b"7654321\r\n").unwrap();
     for (p, data) in &files {
@@ -121,8 +121,8 @@ fn byte_swapped_disk_end_to_end() {
         neuros_core::scan(fs.as_ref(), info.drive, &opts, &Default::default(), &AtomicBool::new(false), |_, _| {})
             .unwrap();
     assert_eq!(items.len(), 3);
-    let dq = items.iter().find(|i| i.track.title == "Dancing Queen").unwrap();
-    assert_eq!(dq.track.artist.as_deref(), Some("ABBA"));
+    let dq = items.iter().find(|i| i.track.title == "Paper Boat").unwrap();
+    assert_eq!(dq.track.artist.as_deref(), Some("Acme"));
     assert_eq!(dq.track.duration_secs, 8); // 300 frames * 1152 / 44100 ≈ 7.8 s
     let wopts = WriteOptions {
         build: BuildOptions { artist_albums: true, ..Default::default() },
@@ -147,19 +147,19 @@ fn byte_swapped_disk_end_to_end() {
     let db = load_database(fs.as_ref(), "WOID_DB/audio", "audio").unwrap();
     assert_eq!(neuros_core::verify::verify(&db), Vec::<String>::new());
     let aa = db.children.iter().find(|c| c.file_stem == "albums").unwrap();
-    assert_eq!(aa.subs[0].names(), ["ABBA", "Bjork"]);
+    assert_eq!(aa.subs[0].names(), ["Acme", "Olmo"]);
     let mut paths: Vec<_> = db.tracks().into_iter().map(|t| t.path).collect();
     paths.sort();
     assert_eq!(
         paths,
-        ["C:/MUSIC/ABBA/Gold/01 Dancing Queen.mp3", "C:/MUSIC/ABBA/Gold/02 SOS.mp3", "C:/MUSIC/Bjork/Joga.mp3"]
+        ["C:/MUSIC/Acme/Daybreak/01 Paper Boat.mp3", "C:/MUSIC/Acme/Daybreak/02 Ping.mp3", "C:/MUSIC/Olmo/Fjuk.mp3"]
     );
     // Music data survived untouched (renamed file too).
     for (p, data) in &files {
-        let p = if p.contains("Björk") { "MUSIC/Bjork/Joga.mp3" } else { p.as_str() };
+        let p = if p.contains("Ölmo") { "MUSIC/Olmo/Fjuk.mp3" } else { p.as_str() };
         assert_eq!(&fs.read_file(p).unwrap(), data, "{p}");
     }
-    assert!(vfs::find_dir_ci(fs.as_ref(), "MUSIC", "Björk").is_none(), "old dir removed");
+    assert!(vfs::find_dir_ci(fs.as_ref(), "MUSIC", "Ölmo").is_none(), "old dir removed");
     for db in ["pcaudio", "idedhisi", "unidedhisi", "failedhisi"] {
         assert!(vfs::find_dir_ci(fs.as_ref(), "WOID_DB", db).is_some());
     }

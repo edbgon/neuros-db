@@ -47,8 +47,8 @@ fn add_files_updates_database_without_rescan() {
     let root = dev.path();
     std::fs::write(root.join("sn.txt"), "1").unwrap();
     // Existing library: album with tracks 2,1 on disk; build its database.
-    put(&root.join("MUSIC/ABBA/Gold/b.mp3"), &fake_mp3("SOS", "ABBA", "Gold", 2, 50));
-    put(&root.join("MUSIC/ABBA/Gold/a.mp3"), &fake_mp3("Dancing Queen", "ABBA", "Gold", 1, 50));
+    put(&root.join("MUSIC/Acme/Daybreak/b.mp3"), &fake_mp3("Ping", "Acme", "Daybreak", 2, 50));
+    put(&root.join("MUSIC/Acme/Daybreak/a.mp3"), &fake_mp3("Paper Boat", "Acme", "Daybreak", 1, 50));
     let src = Source::Mounted(root.to_path_buf());
     let (fs, p) = src.open(true).unwrap();
     let info = neuros_core::inspect(fs.as_ref(), p);
@@ -64,9 +64,9 @@ fn add_files_updates_database_without_rescan() {
     neuros_core::write_database(fs.as_ref(), &info, &items, &opts()).unwrap();
 
     // New files on the host, one with a non-ASCII name, one already on the device.
-    put(&host.path().join("in/Jóga.mp3"), &fake_mp3("Joga", "Bjork", "Homogenic", 1, 40));
-    put(&host.path().join("in/Hunter.mp3"), &fake_mp3("Hunter", "Bjork", "Homogenic", 2, 40));
-    put(&host.path().join("in/a.mp3"), &fake_mp3("Dancing Queen", "ABBA", "Gold", 1, 50));
+    put(&host.path().join("in/Fjúk.mp3"), &fake_mp3("Fjuk", "Olmo", "Lowland", 1, 40));
+    put(&host.path().join("in/Echo.mp3"), &fake_mp3("Echo", "Olmo", "Lowland", 2, 40));
+    put(&host.path().join("in/a.mp3"), &fake_mp3("Paper Boat", "Acme", "Daybreak", 1, 50));
     std::fs::write(host.path().join("in/notes.txt"), "x").unwrap();
 
     let files = neuros_core::device::collect_audio_files(&host.path().join("in"));
@@ -74,16 +74,16 @@ fn add_files_updates_database_without_rescan() {
     let plan = neuros_core::plan_add(&files, &AddLayout::ByTags, "MUSIC", true);
     let mut dests: Vec<_> = plan.iter().map(|p| p.dest.as_str()).collect();
     dests.sort();
-    assert_eq!(dests, ["MUSIC/ABBA/Gold/a.mp3", "MUSIC/Bjork/Homogenic/Hunter.mp3", "MUSIC/Bjork/Homogenic/Joga.mp3"]);
+    assert_eq!(dests, ["MUSIC/Acme/Daybreak/a.mp3", "MUSIC/Olmo/Lowland/Echo.mp3", "MUSIC/Olmo/Lowland/Fjuk.mp3"]);
 
     let info = neuros_core::inspect(fs.as_ref(), None);
     let mut last = (0, 0);
     let rep = neuros_core::add_files(fs.as_ref(), &info, &plan, &opts(), &scan_opts(), |d, t| last = (d, t)).unwrap();
     fs.finish().unwrap();
     assert_eq!(rep.added.len(), 2);
-    assert_eq!(rep.already_present, ["MUSIC/ABBA/Gold/a.mp3"]);
+    assert_eq!(rep.already_present, ["MUSIC/Acme/Daybreak/a.mp3"]);
     assert_eq!(last.0, last.1);
-    assert!(root.join("MUSIC/Bjork/Homogenic/Joga.mp3").exists());
+    assert!(root.join("MUSIC/Olmo/Lowland/Fjuk.mp3").exists());
 
     let vfs = StdVfs::new(root.to_path_buf());
     let db = load_database(&vfs, "WOID_DB/audio", "audio").unwrap();
@@ -96,10 +96,10 @@ fn add_files_updates_database_without_rescan() {
         let e = albums.sai.iter().find(|e| albums.mdb.records[&e.mdb].primary().as_deref() == Some(name)).unwrap();
         albums.pai[&e.pai].entries.iter().map(|p| db.mdb.records[p].primary().unwrap()).collect()
     };
-    assert_eq!(order("Gold"), ["Dancing Queen", "SOS"]);
-    assert_eq!(order("Homogenic"), ["Joga", "Hunter"]);
+    assert_eq!(order("Daybreak"), ["Paper Boat", "Ping"]);
+    assert_eq!(order("Lowland"), ["Fjuk", "Echo"]);
     // Artist → Album menu includes the new artist.
-    assert_eq!(albums.subs[0].names(), ["ABBA", "Bjork"]);
+    assert_eq!(albums.subs[0].names(), ["Acme", "Olmo"]);
     let _ = vfs.describe();
 }
 
