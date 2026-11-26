@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.1.0-beta.2] - 2026-11-26
 
 - The window opens right away; the device and its database are read in the
   background with a progress indicator (slow over the Neuros's USB 1.1).

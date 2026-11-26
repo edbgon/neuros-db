@@ -12,6 +12,6 @@ keywords.workspace = true
 [dependencies]
 eframe = "0.37.0"
 egui_extras = "0.37.0"
-neuros-core = { version = "0.1.0-beta.1", path = "../neuros-core" }
+neuros-core = { version = "0.1.0-beta.2", path = "../neuros-core" }
 rfd = "0.18.0"
 sysinfo = "0.40.4"
