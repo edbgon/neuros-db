@@ -273,13 +273,17 @@ fn install_desktop_entry(visible: bool) -> std::io::Result<(PathBuf, bool)> {
         }
         Ok(())
     };
-    write(&data.join(format!("icons/hicolor/256x256/apps/{APP_ID}.png")), ICON_PNG, &mut changed)?;
+    let icon = data.join(format!("icons/hicolor/256x256/apps/{APP_ID}.png"));
+    write(&icon, ICON_PNG, &mut changed)?;
     let path = data.join(format!("applications/{APP_ID}.desktop"));
     let shown_before = std::fs::read_to_string(&path).is_ok_and(|t| !t.lines().any(|l| l.trim() == "NoDisplay=true"));
     let hidden = if visible || shown_before { "" } else { "NoDisplay=true\n" };
     let entry = format!(
-        "[Desktop Entry]\nType=Application\nName=Neuros Database Builder\nComment=Build and manage the music database of a Neuros audio player\nExec=\"{}\" %f\nIcon={APP_ID}\nStartupWMClass={APP_ID}\nTerminal=false\nCategories=AudioVideo;Audio;Utility;\n{hidden}",
-        std::env::current_exe()?.display()
+        "[Desktop Entry]\nType=Application\nName=Neuros Database Builder\nComment=Build and manage the music database of a Neuros audio player\nExec=\"{}\" %f\nIcon={}\nStartupWMClass={APP_ID}\nTerminal=false\nCategories=AudioVideo;Audio;Utility;\n{hidden}",
+        std::env::current_exe()?.display(),
+        // A full path, not a theme name: KWin (title bar) looks theme icons
+        // up once and doesn't see icons installed after it started.
+        icon.display()
     );
     write(&path, entry.as_bytes(), &mut changed)?;
     Ok((path, changed))
