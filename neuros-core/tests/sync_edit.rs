@@ -229,3 +229,28 @@ fn add_folders_recursively_keeping_structure() {
         ["MUSIC/Bravo/First Steps/Dawn.ogg", "MUSIC/Bravo/Second Steps/01 Dusk Song.mp3", "MUSIC/single.mp3"]
     );
 }
+
+#[test]
+fn sync_never_copies_a_file_over_one_of_another_type() {
+    // The PC copy was converted from Ogg to MP3: same tags, new type. It
+    // must arrive as a new .mp3, and the old .ogg is "only on the Neuros".
+    let dev = tempfile::tempdir().unwrap();
+    let pc = tempfile::tempdir().unwrap();
+    let root = dev.path();
+    std::fs::write(root.join("sn.txt"), "1").unwrap();
+    put(&root.join("MUSIC/Game/Theme.ogg"), &fake_mp3("Theme", "Game", "Score", 1, 30));
+    let (fs, _) = Source::Mounted(root.to_path_buf()).open(true).unwrap();
+    let info = neuros_core::inspect(fs.as_ref(), None);
+    let items =
+        neuros_core::scan(fs.as_ref(), info.drive, &sopts(), &Default::default(), &AtomicBool::new(false), |_, _| {})
+            .unwrap();
+    neuros_core::write_database(fs.as_ref(), &info, &items, &wopts()).unwrap();
+    put(&pc.path().join("Game/Theme.mp3"), &fake_mp3("Theme", "Game", "Score", 1, 31));
+    let info = neuros_core::inspect(fs.as_ref(), None);
+    let plan =
+        plan_sync(fs.as_ref(), &known(&info), pc.path(), "MUSIC", true, true, &AtomicBool::new(false), |_, _| {})
+            .unwrap();
+    assert_eq!(plan.entries.len(), 1);
+    assert_eq!((plan.entries[0].action, plan.entries[0].dest.as_str()), (SyncAction::Copy, "MUSIC/Game/Theme.mp3"));
+    assert_eq!(plan.extra.iter().map(|(p, _)| p.as_str()).collect::<Vec<_>>(), ["MUSIC/Game/Theme.ogg"]);
+}

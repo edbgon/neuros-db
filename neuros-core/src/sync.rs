@@ -277,22 +277,26 @@ pub fn plan_sync(
     }
 
     // 3. Same artist/album/title in the database (file changed on the PC).
-    // Only pairs that are unique on both sides.
-    let mut dev_keys: HashMap<(String, String, String), Vec<String>> = HashMap::new();
+    // Only pairs that are unique on both sides, and of the same file type:
+    // the Neuros picks the decoder by extension, so an MP3 must not be
+    // copied over an .ogg (or the other way round).
+    let ext = |p: &str| p.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
+    type TagKey = ((String, String, String), String);
+    let mut dev_keys: HashMap<TagKey, Vec<String>> = HashMap::new();
     for t in known {
         let k = rel_of(&t.device_path);
         if device_map.contains_key(&k)
             && let Some(key) = tag_key(&t.title, t.artist.as_deref(), t.album.as_deref())
         {
-            dev_keys.entry(key).or_default().push(k);
+            dev_keys.entry((key, ext(&k))).or_default().push(k);
         }
     }
-    let mut pc_keys: HashMap<(String, String, String), Vec<usize>> = HashMap::new();
+    let mut pc_keys: HashMap<TagKey, Vec<usize>> = HashMap::new();
     for (i, e) in entries.iter().enumerate() {
         if e.matched == Match::None
             && let Some(key) = tag_key(&e.tags.title, e.tags.artist.as_deref(), e.tags.album.as_deref())
         {
-            pc_keys.entry(key).or_default().push(i);
+            pc_keys.entry((key, ext(&e.dest))).or_default().push(i);
         }
     }
     for (key, idx) in pc_keys {

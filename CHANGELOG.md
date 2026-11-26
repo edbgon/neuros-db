@@ -5,6 +5,8 @@
 - Delete tracks from the Neuros: select them, then *🗑 Delete from Neuros…*
   or the Delete key. CLI: `neuros-db delete --match X --yes`.
 - Clicking a track's text now selects the row.
+- Sync no longer copies a file over one of another type with the same tags
+  (e.g. an MP3 converted from an Ogg replacing the old `.ogg` in place).
 
 ## [0.1.0-beta.2] - 2026-11-26
 
