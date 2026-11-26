@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+- Delete tracks from the Neuros: select them, then *🗑 Delete from Neuros…*
+  or the Delete key. CLI: `neuros-db delete --match X --yes`.
+- Clicking a track's text now selects the row.
+
 ## [0.1.0-beta.2] - 2026-11-26
 
 - The window opens right away; the device and its database are read in the

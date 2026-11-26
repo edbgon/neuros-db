@@ -415,21 +415,42 @@ pub fn find_duplicates(
     Ok(out)
 }
 
-/// Delete `paths` (device-relative) from the device and the database.
-/// Call `vfs.finish()` afterwards.
+/// Delete `paths` (device-relative, e.g. `MUSIC/a/b.mp3`) from the device
+/// and the database. A file that is already gone only loses its record
+/// (listed in `report.skipped`). Call `vfs.finish()` afterwards.
 pub fn delete_tracks(vfs: &dyn Vfs, info: &DeviceInfo, paths: &[String], opts: &WriteOptions) -> Result<WriteReport> {
     let db = info.existing.as_ref().ok_or_else(|| Error::Other("no database on the device".into()))?;
-    let drive = opts.drive.unwrap_or(info.drive);
     let tracks: Vec<Track> = db.tracks().iter().map(|t| t.to_track()).collect();
-    let gone: std::collections::HashSet<String> =
-        paths.iter().map(|p| crate::scan::device_path(drive, p).to_lowercase()).collect();
+    // Compare without the drive letter ("C:/").
+    let gone: std::collections::HashSet<String> = paths.iter().map(|p| p.to_lowercase()).collect();
     commit(vfs, info, tracks, opts, &info.overrides, WriteReport::default(), |tracks, report| {
         for p in paths {
-            vfs.remove(p)?;
-            remove_empty_parents(vfs, vfs::parent(p).to_string());
-            report.deleted.push(p.clone());
+            match vfs::resolve_file_ci(vfs, p) {
+                Some(real) => {
+                    vfs.remove(&real)?;
+                    remove_empty_parents(vfs, vfs::parent(&real).to_string());
+                    report.deleted.push(real);
+                }
+                None => {
+                    // Tidy up the folder it was in, if that is empty now.
+                    let mut dir = String::new();
+                    for d in vfs::parent(p).split('/').filter(|d| !d.is_empty()) {
+                        match vfs::find_dir_ci(vfs, &dir, d) {
+                            Some(real) => dir = real,
+                            None => {
+                                dir.clear();
+                                break;
+                            }
+                        }
+                    }
+                    if !dir.is_empty() {
+                        remove_empty_parents(vfs, dir);
+                    }
+                    report.skipped.push((p.clone(), "file was already gone; record removed".into()));
+                }
+            }
         }
-        tracks.retain(|t| !gone.contains(&t.device_path.to_lowercase()));
+        tracks.retain(|t| !gone.contains(&t.device_path.get(3..).unwrap_or("").to_lowercase()));
         Ok(())
     })
 }

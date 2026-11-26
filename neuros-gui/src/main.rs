@@ -195,6 +195,8 @@ struct App {
     /// `inspect` was asked for while another job ran.
     pending_inspect: bool,
     options_open: bool,
+    /// Device tracks (indices) waiting for "really delete?".
+    confirm_delete: Option<Vec<usize>>,
     mode: Mode,
     root: String,
     raw_path: String,
@@ -331,6 +333,7 @@ impl App {
             ctx,
             pending_inspect: false,
             options_open: false,
+            confirm_delete: None,
             mode: Mode::Mounted,
             root: String::new(),
             raw_path: String::new(),
@@ -679,13 +682,16 @@ impl App {
                             for f in &rep.deleted {
                                 self.say(format!("Deleted {f}"));
                             }
+                            for (f, why) in &rep.skipped {
+                                self.say(format!("{f}: {why}"));
+                            }
                             self.say(format!(
-                                "Deleted {} duplicate files; database now has {} tracks.",
+                                "Deleted {} files; database now has {} tracks.",
                                 rep.deleted.len(),
                                 rep.tracks_written
                             ));
                         }
-                        Err(e) => self.say(format!("Deleting duplicates failed: {e}")),
+                        Err(e) => self.say(format!("Deleting failed: {e}")),
                     }
                     self.inspect();
                 }
@@ -1186,6 +1192,7 @@ impl App {
         });
 
         let rows = self.scan_rows();
+        ui.style_mut().interaction.selectable_labels = false;
 
         let warn_color = ui.visuals().warn_fg_color;
         let drive = self.drive();
@@ -1661,6 +1668,9 @@ impl App {
         });
         let rows = self.device_rows();
         let mut clicked: Option<(usize, egui::Modifiers)> = None;
+        // Text in rows must not grab clicks (for text selection); a click
+        // anywhere on a row selects it.
+        ui.style_mut().interaction.selectable_labels = false;
         let mods = ui.input(|i| i.modifiers);
         TableBuilder::new(ui)
             .striped(true)
@@ -1723,6 +1733,15 @@ impl App {
                     }
                 });
             });
+        if !self.selected.is_empty()
+            && !self.busy()
+            && !self.edits_dirty()
+            && self.confirm_delete.is_none()
+            && ui.input(|i| i.key_pressed(egui::Key::Delete))
+            && !ui.ctx().egui_wants_keyboard_input()
+        {
+            self.confirm_delete = Some(self.selected.iter().copied().collect());
+        }
         if let Some((i, m)) = clicked {
             let range = if m.shift {
                 self.anchor.and_then(|a| {
@@ -1907,6 +1926,22 @@ impl App {
                 self.edits.clear(&self.device_tracks[i].device_path);
             }
             self.edit.for_sel.clear();
+        }
+        ui.add_space(10.0);
+        ui.separator();
+        let dirty = self.edits_dirty();
+        let label = if n == 1 {
+            "🗑 Delete from Neuros…".to_string()
+        } else {
+            format!("🗑 Delete {n} tracks from Neuros…")
+        };
+        if ui
+            .add_enabled(!self.busy() && !dirty, egui::Button::new(label))
+            .on_hover_text("Delete the music files from the Neuros and remove them from the database. (Delete key)")
+            .on_disabled_hover_text("Save or discard your edits first.")
+            .clicked()
+        {
+            self.confirm_delete = Some(sel.clone());
         }
         ui.add_space(10.0);
         ui.label(
@@ -2310,6 +2345,60 @@ impl App {
         self.say("Fixing text…");
     }
 
+    fn delete_dialog(&mut self, ctx: &egui::Context) {
+        let Some(sel) = &self.confirm_delete else { return };
+        let tracks: Vec<&Track> = sel.iter().filter_map(|&i| self.device_tracks.get(i)).collect();
+        let kb: u64 = tracks.iter().map(|t| t.size_kb as u64).sum();
+        let mut go = false;
+        let mut close = false;
+        let resp = egui::Modal::new(egui::Id::unique("delete-tracks")).show(ctx, |ui| {
+            ui.set_width(520.0);
+            ui.heading(if tracks.len() == 1 {
+                "Delete this track?".to_string()
+            } else {
+                format!("Delete {} tracks?", tracks.len())
+            });
+            ui.add_space(4.0);
+            for t in tracks.iter().take(8) {
+                let who = t.artist.as_deref().map(|a| format!(" — {a}")).unwrap_or_default();
+                ui.label(format!("• {}{who}", t.title));
+            }
+            if tracks.len() > 8 {
+                ui.weak(format!("… and {} more", tracks.len() - 8));
+            }
+            ui.add_space(6.0);
+            ui.label(format!(
+                "The files ({:.1} MB) are deleted from the Neuros and removed from the database. This can't be undone.",
+                kb as f64 / 1024.0
+            ));
+            if self.mode == Mode::Raw {
+                ui.label("The disk is written directly. Don't disconnect it until this finishes.");
+            }
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                if ui.button("Delete").clicked() {
+                    go = true;
+                }
+                if ui.button("Cancel").clicked() {
+                    close = true;
+                }
+            });
+        });
+        if resp.should_close() {
+            close = true;
+        }
+        if go {
+            let paths: Vec<String> =
+                tracks.iter().map(|t| t.device_path.get(3..).unwrap_or(&t.device_path).to_string()).collect();
+            self.confirm_delete = None;
+            self.selected.clear();
+            let ctx = ctx.clone();
+            self.start_delete(&ctx, paths);
+        } else if close {
+            self.confirm_delete = None;
+        }
+    }
+
     fn text_fix_dialog(&mut self, ctx: &egui::Context) {
         let Some(changes) = &self.text_fixes else { return };
         let mut go = false;
@@ -2382,7 +2471,7 @@ impl App {
         }
     }
 
-    fn start_delete_dupes(&mut self, ctx: &egui::Context, paths: Vec<String>) {
+    fn start_delete(&mut self, ctx: &egui::Context, paths: Vec<String>) {
         let Some(src) = self.source() else { return };
         let opts = self.write_options();
         let (tx, rx) = channel();
@@ -2403,7 +2492,7 @@ impl App {
         self.items.clear();
         self.scanned = None;
         self.job = Some(Job { rx, cancel: Arc::new(AtomicBool::new(false)), label: "Deleting" });
-        self.say("Deleting duplicates…");
+        self.say("Deleting…");
     }
 
     fn dupes_dialog(&mut self, ctx: &egui::Context) {
@@ -2566,7 +2655,7 @@ impl App {
             self.start_find_dupes(ctx);
         } else if let Some(paths) = go {
             self.dupes = None;
-            self.start_delete_dupes(ctx, paths);
+            self.start_delete(ctx, paths);
         } else if close {
             self.dupes = None;
         }
@@ -2668,6 +2757,7 @@ impl eframe::App for App {
         self.sync_dialog(&ctx);
         self.dupes_dialog(&ctx);
         self.text_fix_dialog(&ctx);
+        self.delete_dialog(&ctx);
 
         // Files or folders dropped onto the window → Add music.
         let dropped: Vec<PathBuf> = ctx.input(|i| {

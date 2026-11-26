@@ -69,6 +69,18 @@ pub fn find_file_ci(vfs: &dyn Vfs, dir: &str, name: &str) -> Option<String> {
     find_ci(vfs, dir, name).filter(|(_, e)| !e.is_dir).map(|(p, _)| p)
 }
 
+/// Resolve a whole relative path to a file case-insensitively, folder by
+/// folder; returns the path with the case actually on disk.
+pub fn resolve_file_ci(vfs: &dyn Vfs, rel: &str) -> Option<String> {
+    let parts: Vec<&str> = rel.split('/').filter(|p| !p.is_empty()).collect();
+    let (name, dirs) = parts.split_last()?;
+    let mut cur = String::new();
+    for d in dirs {
+        cur = find_dir_ci(vfs, &cur, d)?;
+    }
+    find_file_ci(vfs, &cur, name)
+}
+
 pub fn exists(vfs: &dyn Vfs, rel: &str) -> bool {
     rel.is_empty() || find_ci(vfs, parent(rel), file_name(rel)).is_some()
 }

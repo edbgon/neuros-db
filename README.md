@@ -22,6 +22,7 @@ On Linux, *Options → Add to the application menu* adds it to your menu.
 - Sync a music folder from the computer. Files already on the Neuros under
   other names are recognised and not copied again.
 - Edit title, artist, album and genre. Edits survive rebuilds.
+- Delete tracks from the Neuros.
 - Find and remove duplicate songs.
 - Repair `?` left by old taggers (`Don?t` → `Don't`).
 - Albums → Artists menu (firmware 2.14+).
@@ -47,6 +48,7 @@ choose *Hard disk on USB-IDE adapter* in the GUI, or give the CLI the device
     neuros-db add      <target> FILES|DIRS    # copy music on
     neuros-db sync     <target> ~/Music [--delete] [--dry-run]
     neuros-db edit     <target> --match X --artist Y
+    neuros-db delete   <target> --match X [--yes]
     neuros-db dupes    <target> [--delete] [--dry-run]
     neuros-db fix-text <target> [--dry-run]
     neuros-db verify   <target>

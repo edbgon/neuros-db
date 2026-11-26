@@ -184,6 +184,20 @@ enum Cmd {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Delete tracks whose title/artist/album/path contains MATCH from the
+    /// device (files and database records). Lists them unless --yes is given.
+    Delete {
+        #[command(flatten)]
+        target: Target,
+        /// Case-insensitive text to find tracks by.
+        #[arg(long = "match")]
+        pattern: String,
+        /// Really delete the listed tracks.
+        #[arg(long)]
+        yes: bool,
+        #[arg(long)]
+        no_backup: bool,
+    },
     /// Copy the device's WOID_DB to a folder on this computer.
     Backup {
         #[command(flatten)]
@@ -594,6 +608,52 @@ fn main() -> Result<()> {
             vfs.finish().context("flushing to disk")?;
             if let Some(b) = &r.backup {
                 println!("backup:    {}", b.display());
+            }
+            println!("deleted {} files; database has {} tracks", r.deleted.len(), r.tracks_written);
+        }
+        Cmd::Delete { target, pattern, yes, no_backup } => {
+            let (_, vfs, info) = open(&target, yes)?;
+            let db = info.existing.as_ref().context("no database on the device")?;
+            let pat = pattern.to_lowercase();
+            let tracks: Vec<_> = db
+                .tracks()
+                .iter()
+                .map(|t| t.to_track())
+                .filter(|t| {
+                    [Some(&t.title), t.artist.as_ref(), t.album.as_ref(), Some(&t.device_path)]
+                        .into_iter()
+                        .flatten()
+                        .any(|s| s.to_lowercase().contains(&pat))
+                })
+                .collect();
+            for t in &tracks {
+                println!("  {} | {} | {}", t.title, t.artist.as_deref().unwrap_or(""), t.device_path);
+            }
+            let mb: f64 = tracks.iter().map(|t| t.size_kb as f64 / 1024.0).sum();
+            println!("{} tracks match ({mb:.1} MB)", tracks.len());
+            if tracks.is_empty() {
+                return Ok(());
+            }
+            if !yes {
+                println!("nothing deleted; add --yes to delete these files from the device");
+                return Ok(());
+            }
+            let paths: Vec<String> =
+                tracks.iter().map(|t| t.device_path.get(3..).unwrap_or(&t.device_path).to_string()).collect();
+            let opts = WriteOptions {
+                build: BuildOptions { ignore_leading_the: true, artist_albums: info.artist_albums },
+                rename_files: true,
+                backup_dir: (!no_backup).then(default_backup_dir),
+                drive: None,
+                dry_run: false,
+            };
+            let r = neuros_core::dedupe::delete_tracks(vfs.as_ref(), &info, &paths, &opts)?;
+            vfs.finish().context("flushing to disk")?;
+            if let Some(b) = &r.backup {
+                println!("backup:    {}", b.display());
+            }
+            for (f, why) in &r.skipped {
+                println!("  {f}: {why}");
             }
             println!("deleted {} files; database has {} tracks", r.deleted.len(), r.tracks_written);
         }
