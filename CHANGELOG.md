@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.1.0-beta.3] - 2026-11-26
 
 - Delete tracks from the Neuros: select them, then *🗑 Delete from Neuros…*
   or the Delete key. CLI: `neuros-db delete --match X --yes`.
